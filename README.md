@@ -17,10 +17,30 @@ The codebase is organized for extension by both humans and coding agents:
 
 ## Quick start
 
-1. Install dependencies.
-2. Install Playwright browsers: `playwright install chromium`
-3. Set `OPENROUTER_API_KEY`.
-4. Run the API:
+Bootstrap and configure everything with:
+
+```bash
+./scripts/setup.sh
+```
+
+The script is interactive and reusable. It will:
+
+- ask for your OpenRouter API key
+- ask for the embedding model and ranked chat models
+- ask for browser, logging, trace, and docs-path settings
+- write `.env`
+- write `config/models.json`
+- create or reuse `.venv`
+- install Python dependencies
+- install the selected Playwright browser
+
+Manual path:
+
+1. Create a virtualenv.
+2. Install dependencies with `pip install -e ".[dev]"`.
+3. Install Playwright browsers with `playwright install chromium`.
+4. Set `OPENROUTER_API_KEY`.
+5. Run the API:
 
 ```bash
 uvicorn agent_platform.api.app:create_app --factory --reload

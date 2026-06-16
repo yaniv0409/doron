@@ -1,22 +1,99 @@
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
-from agent_platform.config.settings import AppSettings
+from agent_platform.config.settings import AppSettings, ModelSettings
 
 
 def load_settings() -> AppSettings:
     load_dotenv()
     settings = AppSettings()
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    if api_key:
-        settings.openrouter.api_key = api_key
-    app_url = os.getenv("OPENROUTER_APP_URL")
-    if app_url:
-        settings.openrouter.app_url = app_url
-    app_title = os.getenv("OPENROUTER_APP_TITLE")
-    if app_title:
-        settings.openrouter.app_title = app_title
+    apply_environment(settings, os.environ)
     return settings
+
+
+def apply_environment(settings: AppSettings, environ: dict[str, str] | os._Environ[str]) -> None:
+    _set_if_present(environ, "OPENROUTER_API_KEY", lambda value: _setattr(settings.openrouter, "api_key", value))
+    _set_if_present(environ, "OPENROUTER_BASE_URL", lambda value: _setattr(settings.openrouter, "base_url", value))
+    _set_if_present(environ, "OPENROUTER_APP_URL", lambda value: _setattr(settings.openrouter, "app_url", value))
+    _set_if_present(environ, "OPENROUTER_APP_TITLE", lambda value: _setattr(settings.openrouter, "app_title", value))
+    _set_if_present(
+        environ,
+        "OPENROUTER_EMBEDDING_MODEL",
+        lambda value: _setattr(settings.openrouter, "embedding_model", value),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_LOG_DIR",
+        lambda value: _setattr(settings.logging, "directory", Path(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_LOG_MAX_BYTES",
+        lambda value: _setattr(settings.logging, "max_bytes", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_LOG_BACKUP_COUNT",
+        lambda value: _setattr(settings.logging, "backup_count", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_TRACE_DIR",
+        lambda value: _setattr(settings.traces, "directory", Path(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_CHECKPOINT_DIR",
+        lambda value: _setattr(settings.traces, "checkpoint_directory", Path(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_BROWSER_HEADLESS",
+        lambda value: _setattr(settings.browser, "headless", _to_bool(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_BROWSER_TIMEOUT_MS",
+        lambda value: _setattr(settings.browser, "default_timeout_ms", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_KUZU_REFERENCE_PATH",
+        lambda value: _setattr(settings.docs, "kuzu_reference_path", Path(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_MODELS_FILE",
+        lambda value: _set_models_from_file(settings, Path(value)),
+    )
+
+
+def _set_models_from_file(settings: AppSettings, path: Path) -> None:
+    if not path.exists():
+        return
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    settings.models = [ModelSettings.model_validate(item) for item in payload]
+
+
+def _set_if_present(
+    environ: dict[str, str] | os._Environ[str],
+    key: str,
+    setter: Any,
+) -> None:
+    value = environ.get(key)
+    if value:
+        setter(value)
+
+
+def _setattr(target: Any, name: str, value: Any) -> None:
+    setattr(target, name, value)
+
+
+def _to_bool(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
