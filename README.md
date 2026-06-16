@@ -74,6 +74,8 @@ Run a simple in-process terminal interface:
 python -m agent_platform.cli.chat --db-path /absolute/path/to/database.kuzu
 ```
 
+If the database path does not exist yet, the platform will initialize a new Kuzu database there on first use.
+
 Optional flags:
 
 - `--preferred-model <model>`

@@ -9,6 +9,7 @@ python -m agent_platform.cli.chat --db-path /absolute/path/to/database.kuzu
 ```
 
 If `--db-path` is omitted, the CLI prompts for it at startup.
+If the path does not exist, the runtime creates a new Kuzu database at that location.
 
 ## Flags
 

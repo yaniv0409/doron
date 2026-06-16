@@ -11,6 +11,8 @@ Requirements:
 - normalize result rows to Python dictionaries
 - checkpoint the DB file before first mutation
 - audit all mutating queries
+- return structured tool results with `ok`, `error_type`, `error_message`, `retry_hint`, and `data`
+- return recoverable DB query failures to the agent instead of aborting the mission immediately
 
 ## Browser tools
 
@@ -21,6 +23,7 @@ Requirements:
 
 - mission-scoped browser lifecycle
 - log visited URLs and extraction summaries
+- prefer structured tool results so recoverable browser issues can be reasoned about by the agent
 
 ## Documentation tool
 
@@ -31,6 +34,7 @@ Requirements:
 - read-only
 - backed by local packaged documentation
 - returns section-oriented excerpts with source identifiers
+- returns recoverable lookup errors as structured tool results
 
 ## Model control tool
 

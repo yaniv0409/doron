@@ -10,6 +10,8 @@ The API receives:
 - optional model preferences
 - feature flags for web and database mutation
 
+If the database path does not exist, the runtime initializes a new Kuzu database there before the mission runs.
+
 ## Execution
 
 `MissionService`:
@@ -20,6 +22,8 @@ The API receives:
 4. records tool use, documentation lookups, and graph mutations
 5. performs model handoff if requested
 6. validates the final result
+
+Recoverable tool failures do not automatically fail the mission. Database and documentation tool errors are returned to the agent as structured tool results so the agent can decide whether to inspect schema, retry differently, consult docs, switch tools, or answer without the DB.
 
 ## Completion
 

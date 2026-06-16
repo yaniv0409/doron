@@ -39,6 +39,15 @@ class TraceStore:
         return path
 
     def create_checkpoint(self, trace_id: str, db_path: str) -> Path:
-        checkpoint_path = self._settings.checkpoint_directory / f"{trace_id}.kuzu"
-        shutil.copy2(db_path, checkpoint_path)
+        source_path = Path(db_path)
+        if not source_path.exists():
+            raise FileNotFoundError(f"database path does not exist for checkpoint: {db_path}")
+        checkpoint_path = self._settings.checkpoint_directory / trace_id
+        if source_path.is_dir():
+            if checkpoint_path.exists():
+                shutil.rmtree(checkpoint_path)
+            shutil.copytree(source_path, checkpoint_path)
+            return checkpoint_path
+        checkpoint_path = checkpoint_path.with_suffix(source_path.suffix or ".kuzu")
+        shutil.copy2(source_path, checkpoint_path)
         return checkpoint_path

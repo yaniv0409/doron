@@ -16,9 +16,11 @@ class KuzuGateway:
         if kuzu is None:
             raise DatabaseError("kuzu is not installed")
         path = Path(db_path)
-        if not path.exists():
-            raise DatabaseError(f"database file not found: {db_path}")
-        self._db = kuzu.Database(str(path))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self._db = kuzu.Database(str(path))
+        except Exception as exc:  # pragma: no cover
+            raise DatabaseError(str(exc)) from exc
         self._connection = kuzu.Connection(self._db)
 
     def execute(self, query: str, parameters: dict[str, Any] | None = None) -> list[dict[str, Any]]:

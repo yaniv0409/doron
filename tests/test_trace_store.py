@@ -43,3 +43,36 @@ def test_trace_store_round_trip_preserves_tool_calls_and_web_artifacts(tmp_path:
 
     assert [item.name for item in loaded.tool_calls] == ["open_url", "switch_model"]
     assert loaded.web_artifacts[0].url == "https://example.com"
+
+
+def test_checkpoint_copies_file_database_path(tmp_path: Path) -> None:
+    source = tmp_path / "demo.kuzu"
+    source.write_text("db", encoding="utf-8")
+    store = TraceStore(
+        TraceSettings(
+            directory=tmp_path / "traces",
+            checkpoint_directory=tmp_path / "checkpoints",
+        )
+    )
+
+    checkpoint = store.create_checkpoint("trace-file", str(source))
+
+    assert checkpoint.exists()
+    assert checkpoint.read_text(encoding="utf-8") == "db"
+
+
+def test_checkpoint_copies_directory_database_path(tmp_path: Path) -> None:
+    source = tmp_path / "demo-db"
+    source.mkdir()
+    (source / "data.bin").write_text("db", encoding="utf-8")
+    store = TraceStore(
+        TraceSettings(
+            directory=tmp_path / "traces",
+            checkpoint_directory=tmp_path / "checkpoints",
+        )
+    )
+
+    checkpoint = store.create_checkpoint("trace-dir", str(source))
+
+    assert checkpoint.is_dir()
+    assert (checkpoint / "data.bin").read_text(encoding="utf-8") == "db"

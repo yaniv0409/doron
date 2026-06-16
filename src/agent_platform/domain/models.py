@@ -55,7 +55,19 @@ class ToolCallRecord(BaseModel):
     name: str
     arguments: dict[str, Any]
     result_summary: str
+    ok: bool = True
+    error_type: str | None = None
+    error_message: str | None = None
     created_at: datetime = Field(default_factory=utc_now)
+
+
+class ToolResult(BaseModel):
+    ok: bool
+    tool: str
+    error_type: str | None = None
+    error_message: str | None = None
+    retry_hint: str | None = None
+    data: Any = None
 
 
 class DbMutationRecord(BaseModel):

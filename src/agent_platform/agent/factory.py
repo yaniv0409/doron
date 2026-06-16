@@ -6,6 +6,7 @@ from typing import Any
 from agent_platform.agent.prompts import build_system_prompt
 from agent_platform.application.runtime_builder import MissionRuntime
 from agent_platform.domain.exceptions import ConfigurationError
+from agent_platform.domain.models import ToolResult
 from agent_platform.tools.db_tools import inspect_schema, read_graph, write_graph
 from agent_platform.tools.docs_tools import lookup_kuzu_docs
 from agent_platform.tools.model_tools import request_model_switch
@@ -55,7 +56,7 @@ class AgentFactory:
             ctx: RunContext[MissionRuntime],
             query: str,
             parameters: dict[str, Any] | None = None,
-        ) -> list[dict[str, Any]]:
+        ) -> ToolResult:
             return await read_graph(ctx.deps, query, parameters)
 
         @agent.tool
@@ -63,27 +64,27 @@ class AgentFactory:
             ctx: RunContext[MissionRuntime],
             query: str,
             parameters: dict[str, Any] | None = None,
-        ) -> list[dict[str, Any]]:
+        ) -> ToolResult:
             if not ctx.deps.context.mission_request.db_mutation_enabled:
                 raise ConfigurationError("database mutation is disabled for this mission")
             return await write_graph(ctx.deps, query, parameters)
 
         @agent.tool
-        async def graph_schema(ctx: RunContext[MissionRuntime]) -> str:
+        async def graph_schema(ctx: RunContext[MissionRuntime]) -> ToolResult:
             return await inspect_schema(ctx.deps)
 
         @agent.tool
-        async def kuzu_reference(ctx: RunContext[MissionRuntime], query: str) -> str:
+        async def kuzu_reference(ctx: RunContext[MissionRuntime], query: str) -> ToolResult:
             return await lookup_kuzu_docs(ctx.deps, query)
 
         @agent.tool
-        async def browser_open(ctx: RunContext[MissionRuntime], url: str) -> str:
+        async def browser_open(ctx: RunContext[MissionRuntime], url: str) -> ToolResult:
             if not ctx.deps.context.mission_request.web_enabled:
                 raise ConfigurationError("web access is disabled for this mission")
             return await open_url(ctx.deps, url)
 
         @agent.tool
-        async def browser_text(ctx: RunContext[MissionRuntime]) -> str:
+        async def browser_text(ctx: RunContext[MissionRuntime]) -> ToolResult:
             if not ctx.deps.context.mission_request.web_enabled:
                 raise ConfigurationError("web access is disabled for this mission")
             return await get_page_text(ctx.deps)

@@ -45,6 +45,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def build_defaults(args: argparse.Namespace) -> ChatDefaults:
     db_path = args.db_path or input("Database path: ").strip()
+    print(f"Using database path: {db_path}")
     allowed_models = parse_allowed_models(args.allowed_models)
     return ChatDefaults(
         db_path=db_path,
