@@ -142,6 +142,7 @@ class MissionService:
             tool_calls=runtime.context.tool_calls,
             db_mutations=runtime.context.db_mutations,
             docs_lookups=runtime.context.docs_lookups,
+            web_artifacts=runtime.context.web_artifacts,
             result=result.result if result else None,
             error=error,
             started_at=runtime.context.started_at,

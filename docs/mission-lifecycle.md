@@ -32,3 +32,4 @@ The service returns:
 - trace id
 
 Trace artifacts are written under `traces/<trace_id>/`.
+Tool usage is recorded in the trace as ordered `tool_calls`. Specialized audit sections such as DB mutations, docs lookups, and web artifacts supplement the trace, but `trace.json` is the canonical answer to "what tools were used?".

@@ -97,6 +97,7 @@ class RuntimeContext:
     reasoning_notes: list[str] = field(default_factory=list)
     db_findings: list[str] = field(default_factory=list)
     web_findings: list[str] = field(default_factory=list)
+    web_artifacts: list[WebArtifact] = field(default_factory=list)
     tool_summaries: list[str] = field(default_factory=list)
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
     db_mutations: list[DbMutationRecord] = field(default_factory=list)
@@ -122,6 +123,7 @@ class ExecutionTrace(BaseModel):
     tool_calls: list[ToolCallRecord]
     db_mutations: list[DbMutationRecord]
     docs_lookups: list[DocumentationLookupRecord]
+    web_artifacts: list[WebArtifact]
     result: Any = None
     error: MissionError | None = None
     started_at: datetime

@@ -65,3 +65,28 @@ Receive:
 - trace id
 
 See `docs/` for architecture and implementation details.
+
+## Terminal chat
+
+Run a simple in-process terminal interface:
+
+```bash
+python -m agent_platform.cli.chat --db-path /absolute/path/to/database.kuzu
+```
+
+Optional flags:
+
+- `--preferred-model <model>`
+- `--allowed-models model-a,model-b`
+- `--output-schema /absolute/path/to/schema.json`
+- `--no-web`
+- `--no-db-mutation`
+
+After each prompt, the terminal prints:
+
+- the mission result
+- the final model
+- the trace id
+- a compact ordered list of tools used
+
+Tool usage is traced canonically in `traces/<trace_id>/trace.json` and also written to rolling logs under `logs/`.

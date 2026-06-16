@@ -26,6 +26,11 @@ class TraceStore:
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         return path
 
+    def read_trace(self, trace_id: str) -> ExecutionTrace:
+        path = self._settings.directory / trace_id / "trace.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return self._adapter.validate_python(payload)
+
     def write_request_snapshot(self, trace_id: str, payload: dict[str, Any]) -> Path:
         trace_dir = self._settings.directory / trace_id
         trace_dir.mkdir(parents=True, exist_ok=True)

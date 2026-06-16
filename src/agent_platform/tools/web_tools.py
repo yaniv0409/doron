@@ -17,6 +17,7 @@ async def open_url(runtime: MissionRuntime, url: str) -> str:
     )
     runtime.context.tool_summaries.append(f"open_url: {url}")
     artifact = WebArtifact(url=snapshot.url, title=snapshot.title, summary=snapshot.text[:500])
+    runtime.context.web_artifacts.append(artifact)
     runtime.context.web_findings.append(artifact.model_dump_json())
     return snapshot.text
 
@@ -31,4 +32,5 @@ async def get_page_text(runtime: MissionRuntime) -> str:
         )
     )
     runtime.context.tool_summaries.append("get_page_text")
+    runtime.context.web_findings.append(f"Extracted page text: {len(text)} chars")
     return text[:10_000]
