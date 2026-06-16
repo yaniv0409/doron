@@ -1,0 +1,89 @@
+Metadata-Version: 2.4
+Name: agent-platform
+Version: 0.1.0
+Summary: Generic agent platform built around pydantic-ai, Kuzu, Playwright, and OpenRouter.
+Author: Yaniv
+License: MIT
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi>=0.115.0
+Requires-Dist: httpx>=0.27.0
+Requires-Dist: jsonschema>=4.23.0
+Requires-Dist: kuzu>=0.8.0
+Requires-Dist: playwright>=1.53.0
+Requires-Dist: pydantic>=2.8.0
+Requires-Dist: pydantic-ai-slim[openrouter]>=0.0.24
+Requires-Dist: python-dotenv>=1.0.1
+Requires-Dist: typing-extensions>=4.12.2
+Requires-Dist: uvicorn>=0.30.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.2.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23.8; extra == "dev"
+
+# Agent Platform
+
+Generic agent platform scaffold built around:
+
+- `pydantic-ai` for orchestration
+- Kuzu for graph persistence
+- Playwright for web automation
+- OpenRouter for model and embedding access
+
+The codebase is organized for extension by both humans and coding agents:
+
+- short functions
+- explicit adapters and typed contracts
+- rolling audit logs
+- mission traces persisted to disk
+- documentation in `docs/`
+
+## Quick start
+
+Bootstrap and configure everything with:
+
+```bash
+./scripts/setup.sh
+```
+
+The script is interactive and reusable. It will:
+
+- ask for your OpenRouter API key
+- ask for the embedding model and ranked chat models
+- ask for browser, logging, trace, and docs-path settings
+- write `.env`
+- write `config/models.json`
+- create or reuse `.venv`
+- install Python dependencies
+- install the selected Playwright browser
+
+Manual path:
+
+1. Create a virtualenv.
+2. Install dependencies with `pip install -e ".[dev]"`.
+3. Install Playwright browsers with `playwright install chromium`.
+4. Set `OPENROUTER_API_KEY`.
+5. Run the API:
+
+```bash
+uvicorn agent_platform.api.app:create_app --factory --reload
+```
+
+## API
+
+`POST /missions/run`
+
+Send:
+
+- `prompt`
+- `db_path`
+- optional `output_schema`
+- optional model controls
+
+Receive:
+
+- final result
+- status
+- final model
+- trace id
+
+See `docs/` for architecture and implementation details.
