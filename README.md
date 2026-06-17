@@ -64,6 +64,7 @@ Send:
 - `db_path`
 - optional `output_schema`
 - optional model controls
+- optional `stream=true` to receive SSE events instead of blocking JSON
 
 Receive:
 
@@ -72,16 +73,19 @@ Receive:
 - final model
 - trace id
 
+Stream mode emits live mission progress, tool events, and the final result over SSE from the same endpoint.
+
 See `docs/` for architecture and implementation details.
 
 ## Terminal chat
 
-Run a simple in-process terminal interface:
+Run a terminal chat that talks to the API:
 
 ```bash
-python -m agent_platform.cli.chat --db-path /absolute/path/to/database.kuzu
+python -m agent_platform.cli.chat --db-path /absolute/path/to/database.kuzu --api-url http://127.0.0.1:8000
 ```
 
+If you want the terminal to start a local API server automatically, add `--start-server`.
 If the database path does not exist yet, the platform will initialize a new Kuzu database there on first use.
 
 Optional flags:
@@ -89,6 +93,8 @@ Optional flags:
 - `--preferred-model <model>`
 - `--allowed-models model-a,model-b`
 - `--output-schema /absolute/path/to/schema.json`
+- `--api-url http://127.0.0.1:8000`
+- `--start-server`
 - `--no-web`
 - `--no-db-mutation`
 
@@ -99,5 +105,5 @@ After each prompt, the terminal prints:
 - the trace id
 - a compact ordered list of tools used
 
-Tool usage is traced canonically in `traces/<trace_id>/trace.json` and also written to rolling logs under `logs/`.
+Tool usage is streamed live from the API as tool events, traced canonically in `traces/<trace_id>/trace.json`, and also written to rolling logs under `logs/`.
 Live execution progress is written to `traces/<trace_id>/progress.json`, including browser-stage events such as navigation start, `domcontentloaded`, `networkidle`, fallback, timeout, and extraction.

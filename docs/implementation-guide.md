@@ -6,8 +6,9 @@
 2. Implement infrastructure adapters with narrow interfaces.
 3. Build mission-scoped runtime assembly.
 4. Register short tool functions with the agent.
-5. Add API routes and trace persistence.
-6. Add integration tests around real Kuzu and Playwright environments.
+5. Add API routes with blocking and streamed mission modes.
+6. Add the terminal client as an API consumer.
+7. Add integration tests around real Kuzu and Playwright environments.
 
 ## Coding rules
 
@@ -16,6 +17,7 @@
 - avoid cross-layer imports upward
 - log with `trace_id`
 - persist request snapshots and final traces
+- treat the API as the stable user-facing control surface
 
 ## High-value extension points
 

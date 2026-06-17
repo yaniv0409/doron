@@ -31,6 +31,12 @@ Requirements:
 - write browser-stage progress events so stalls can be attributed to navigation, `networkidle`, or extraction
 - prefer structured tool results so recoverable browser issues can be reasoned about by the agent
 
+## Mission stream
+
+- `POST /missions/run` accepts `stream=true` for SSE mode
+- stream events include mission progress, tool starts/completions, and final result/failure
+- the terminal chat consumes the streamed API, not the internal runtime directly
+
 ## Documentation tool
 
 - `kuzu_reference(query)`

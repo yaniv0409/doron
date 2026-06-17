@@ -14,6 +14,7 @@ class MissionRunRequest(BaseModel):
     mission_metadata: dict[str, Any] | None = None
     web_enabled: bool = True
     db_mutation_enabled: bool = True
+    stream: bool = False
 
 
 class MissionRunError(BaseModel):
@@ -31,3 +32,8 @@ class MissionRunResponse(BaseModel):
     started_at: str
     completed_at: str
     error: MissionRunError | None = None
+
+
+class MissionStreamEvent(BaseModel):
+    event: str
+    data: dict[str, Any]

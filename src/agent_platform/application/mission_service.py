@@ -6,11 +6,12 @@ from typing import Any
 from agent_platform.agent.factory import AgentFactory
 from agent_platform.agent.prompts import build_handoff_prompt
 from agent_platform.application.result_validation import ResultValidator
+from agent_platform.application.live_events import emit_runtime_event, emit_stream_event
 from agent_platform.application.runtime_builder import MissionRuntime, RuntimeBuilder
 from agent_platform.config.settings import AppSettings
 from agent_platform.domain.enums import LogCategory, MissionStatus, ResultFormat
 from agent_platform.domain.exceptions import AgentPlatformError, ContextRefreshRequested, ModelSwitchRequested, OutputValidationError
-from agent_platform.domain.models import ExecutionTrace, MissionError, MissionRequest, MissionResult, RuntimeEvent, utc_now
+from agent_platform.domain.models import ExecutionTrace, MissionError, MissionRequest, MissionResult, utc_now
 from agent_platform.infrastructure.logging import get_logger
 
 
@@ -28,14 +29,24 @@ class MissionService:
     def run_sync(self, request: MissionRequest) -> MissionResult:
         return asyncio.run(self.run(request))
 
-    async def run(self, request: MissionRequest) -> MissionResult:
+    async def run(self, request: MissionRequest, *, event_hook: Any | None = None) -> MissionResult:
         runtime = self._runtime_builder.build(request)
         runtime.context.progress_hook = lambda **kwargs: self._write_progress(runtime, **kwargs)
+        runtime.context.event_hook = event_hook
         self._runtime_builder.services.trace_store.write_request_snapshot(
             runtime.context.trace_id,
             request.model_dump(mode="json"),
         )
-        self._write_progress(runtime, phase="request_loaded", message="mission request snapshot written")
+        emit_stream_event(
+            runtime.context,
+            "mission.started",
+            {
+                "trace_id": runtime.context.trace_id,
+                "request": request.model_dump(mode="json"),
+                "model": runtime.context.current_model.name,
+            },
+        )
+        self._append_runtime_event(runtime, "request_loaded", "mission request snapshot written")
         model_sequence = [runtime.context.current_model.name]
         prompt = request.prompt
         try:
@@ -122,16 +133,19 @@ class MissionService:
                 await runtime.browser.close()
                 return mission_result
         except asyncio.TimeoutError:
-            return await self._fail(
+            result = await self._fail(
                 runtime,
                 model_sequence,
                 "agent_run_timeout",
                 f"agent run exceeded {self._runtime_builder.services.settings.runtime.agent_run_timeout_seconds}s timeout",
             )
+            return result
         except AgentPlatformError as exc:
-            return await self._fail(runtime, model_sequence, type(exc).__name__, str(exc))
+            result = await self._fail(runtime, model_sequence, type(exc).__name__, str(exc))
+            return result
         except Exception as exc:  # pragma: no cover
-            return await self._fail(runtime, model_sequence, "unexpected_error", str(exc))
+            result = await self._fail(runtime, model_sequence, "unexpected_error", str(exc))
+            return result
 
     async def _run_once(self, runtime: MissionRuntime, prompt: str) -> str:
         session = self._agent_factory.create(runtime)
@@ -156,7 +170,7 @@ class MissionService:
             runtime.context.current_model.name,
             extra=extra,
         )
-        self._write_progress(runtime, phase="agent_run_started", message="agent.run started")
+        self._append_runtime_event(runtime, "agent_run_started", "agent.run started")
         try:
             result = await asyncio.wait_for(
                 session.agent.run(prompt, deps=runtime),
@@ -165,7 +179,7 @@ class MissionService:
         except ModelSwitchRequested:
             raise
         finally:
-            self._write_progress(runtime, phase="agent_run_wait_complete", message="agent.run returned or raised")
+            self._append_runtime_event(runtime, "agent_run_wait_complete", "agent.run returned or raised")
         self._append_runtime_event(
             runtime,
             "agent_run_complete",
@@ -235,7 +249,7 @@ class MissionService:
             error=error,
         )
         self._persist_trace(runtime, model_sequence, result, error)
-        self._write_progress(runtime, phase="failed", message=message)
+        self._append_runtime_event(runtime, "failed", message, {"code": code})
         await runtime.browser.close()
         self._logger.error(message, extra={"trace_id": runtime.context.trace_id})
         return result
@@ -260,14 +274,7 @@ class MissionService:
         message: str,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        runtime.context.runtime_events.append(
-            RuntimeEvent(
-                phase=phase,
-                message=message,
-                metadata=metadata or {},
-            )
-        )
-        self._write_progress(runtime, phase=phase, message=message, metadata=metadata)
+        emit_runtime_event(runtime.context, phase, message, metadata or {})
 
     def _write_progress(
         self,

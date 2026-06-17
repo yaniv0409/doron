@@ -3,40 +3,58 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
-from agent_platform.application.mission_service import MissionService
-from agent_platform.config.loader import load_settings
-from agent_platform.contracts.serialization import to_api_response
-from agent_platform.domain.models import MissionRequest
-from agent_platform.infrastructure.logging import configure_logging
-from agent_platform.infrastructure.trace_store import TraceStore
+from agent_platform.cli.api_client import MissionApiClient
+from agent_platform.contracts.api import MissionRunRequest, MissionRunResponse, MissionStreamEvent
 
 
 @dataclass(slots=True)
 class ChatDefaults:
     db_path: str
+    api_url: str = "http://127.0.0.1:8000"
     preferred_model: str | None = None
     allowed_models: list[str] | None = None
     web_enabled: bool = True
     db_mutation_enabled: bool = True
     output_schema: dict[str, Any] | None = None
+    start_server: bool = False
+    server_ready_timeout_seconds: int = 20
 
 
 class ChatSession:
     def __init__(self, defaults: ChatDefaults) -> None:
         self._defaults = defaults
-        self._settings = load_settings()
-        configure_logging(self._settings.logging)
-        self._service = MissionService(self._settings)
-        self._trace_store = TraceStore(self._settings.traces)
+        self._client = MissionApiClient(
+            defaults.api_url,
+            start_server=defaults.start_server,
+            server_ready_timeout_seconds=defaults.server_ready_timeout_seconds,
+        )
 
     @property
     def defaults(self) -> ChatDefaults:
         return self._defaults
 
-    def run_prompt(self, prompt: str) -> tuple[Any, Any]:
-        request = MissionRequest(
+    def close(self) -> None:
+        self._client.close()
+
+    def stream_prompt(self, prompt: str) -> Iterator[MissionStreamEvent]:
+        request = self._build_request(prompt)
+        yield from self._client.stream_mission(request)
+
+    def run_prompt(self, prompt: str) -> tuple[MissionRunResponse, list[MissionStreamEvent]]:
+        response: MissionRunResponse | None = None
+        events: list[MissionStreamEvent] = []
+        for event in self.stream_prompt(prompt):
+            events.append(event)
+            if event.event in {"mission.completed", "mission.failed"}:
+                response = MissionRunResponse.model_validate(event.data)
+        if response is None:
+            raise RuntimeError("mission stream completed without a final response")
+        return response, events
+
+    def _build_request(self, prompt: str) -> MissionRunRequest:
+        return MissionRunRequest(
             prompt=prompt,
             db_path=self._defaults.db_path,
             output_schema=self._defaults.output_schema,
@@ -44,11 +62,8 @@ class ChatSession:
             allowed_models=self._defaults.allowed_models,
             web_enabled=self._defaults.web_enabled,
             db_mutation_enabled=self._defaults.db_mutation_enabled,
+            stream=True,
         )
-        result = self._service.run_sync(request)
-        response = to_api_response(result)
-        trace = self._trace_store.read_trace(result.trace_id)
-        return response, trace
 
 
 def load_output_schema(path: str | None) -> dict[str, Any] | None:

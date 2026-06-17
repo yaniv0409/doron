@@ -162,6 +162,7 @@ class RuntimeContext:
     browser_session_started: bool = False
     db_checkpoint_path: str | None = None
     progress_hook: Any | None = None
+    event_hook: Any | None = None
 
     def build_transfer_packet(self) -> ContextTransferPacket:
         if self.compressed_memory is not None:

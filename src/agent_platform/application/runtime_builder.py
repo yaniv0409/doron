@@ -4,8 +4,8 @@ import uuid
 from dataclasses import dataclass
 
 from agent_platform.config.settings import AppSettings
-from agent_platform.domain.models import RuntimeEvent
 from agent_platform.application.context_compression import ContextCompressor
+from agent_platform.application.live_events import emit_runtime_event
 from agent_platform.domain.models import MissionRequest, RuntimeContext, utc_now
 from agent_platform.infrastructure.browser import PlaywrightBrowserEngine
 from agent_platform.infrastructure.docs_loader import DocumentationRepository
@@ -74,16 +74,10 @@ class RuntimeBuilder:
 
 
 def _record_browser_event(context: RuntimeContext, event) -> None:
-    context.runtime_events.append(
-        RuntimeEvent(
-            phase=event.stage,
-            message=event.message,
-            metadata=dict(event.metadata),
-        )
+    emit_runtime_event(
+        context,
+        event.stage,
+        event.message,
+        dict(event.metadata),
+        stream_event="mission.progress",
     )
-    if context.progress_hook is not None:
-        context.progress_hook(
-            phase=event.stage,
-            message=event.message,
-            metadata=dict(event.metadata),
-        )
