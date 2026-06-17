@@ -13,7 +13,8 @@ async def request_model_switch(runtime: MissionRuntime, target_model: str, reaso
             "switch_model",
             {"target_model": target_model, "reason": reason},
             result_summary=f"requested switch to {target_model}",
+            reason=reason,
         )
     )
-    runtime.context.tool_summaries.append(f"switch_model: {target_model}")
+    runtime.context.tool_summaries.append(f"switch_model: {target_model} | reason: {reason}")
     raise ModelSwitchRequested(target_model)

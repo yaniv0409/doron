@@ -2,9 +2,9 @@
 
 ## Graph tools
 
-- `graph_read(query, parameters)`
-- `graph_write(query, parameters)`
-- `graph_schema()`
+- `graph_read(query, parameters, reason)`
+- `graph_write(query, parameters, reason)`
+- `graph_schema(reason)`
 
 Requirements:
 
@@ -12,12 +12,13 @@ Requirements:
 - checkpoint the DB file before first mutation
 - audit all mutating queries
 - return structured tool results with `ok`, `error_type`, `error_message`, `retry_hint`, and `data`
+- require a short reason on every tool call
 - return recoverable DB query failures to the agent instead of aborting the mission immediately
 
 ## Browser tools
 
-- `browser_open(urls)`
-- `browser_text()`
+- `browser_open(urls, reason)`
+- `browser_text(reason)`
 
 Requirements:
 
@@ -29,6 +30,8 @@ Requirements:
 - return structured links with `text`, `href`, and optional `title`
 - fetch multiple URLs in parallel through a configurable thread pool
 - preserve input order and return partial success when some URLs fail
+- cap browser tool usage at 20 calls per mission by default
+- require a short reason on every tool call
 - log visited URLs and extraction summaries
 - write browser-stage progress events so stalls can be attributed to navigation, `networkidle`, or extraction
 - prefer structured tool results so recoverable browser issues can be reasoned about by the agent
@@ -41,7 +44,7 @@ Requirements:
 
 ## Documentation tool
 
-- `kuzu_reference(query)`
+- `kuzu_reference(query, reason)`
 
 Requirements:
 

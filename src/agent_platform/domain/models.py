@@ -55,6 +55,7 @@ class ToolCallRecord(BaseModel):
     name: str
     arguments: dict[str, Any]
     result_summary: str
+    reason: str | None = None
     ok: bool = True
     error_type: str | None = None
     error_message: str | None = None
@@ -109,11 +110,14 @@ class WebFetchResult(BaseModel):
 
 
 class WebFetchBatchResult(BaseModel):
+    reason: str
     requested_urls: list[str]
     results: list[WebFetchResult]
     successful_count: int
     failed_count: int
     max_workers: int
+    web_tool_calls_used: int
+    web_tool_calls_remaining: int
 
 
 class DocumentationLookupRecord(BaseModel):
@@ -176,6 +180,8 @@ class RuntimeContext:
     docs_lookups: list[DocumentationLookupRecord] = field(default_factory=list)
     compression_events: list[CompressionEvent] = field(default_factory=list)
     runtime_events: list[RuntimeEvent] = field(default_factory=list)
+    web_tool_calls_used: int = 0
+    web_tool_call_budget: int = 20
     compressed_memory: CompressedMemory | None = None
     pending_context_refresh_reason: str | None = None
     compression_notice: str | None = None
@@ -186,6 +192,12 @@ class RuntimeContext:
     db_checkpoint_path: str | None = None
     progress_hook: Any | None = None
     event_hook: Any | None = None
+
+    def web_tool_budget(self) -> int:
+        return self.web_tool_call_budget
+
+    def web_tool_calls_remaining(self) -> int:
+        return max(0, self.web_tool_budget() - self.web_tool_calls_used)
 
     def build_transfer_packet(self) -> ContextTransferPacket:
         if self.compressed_memory is not None:

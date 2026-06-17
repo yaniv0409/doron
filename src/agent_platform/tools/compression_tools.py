@@ -30,6 +30,7 @@ async def compress_context(runtime: MissionRuntime, reason: str) -> ToolResult:
             "compress_context",
             {"reason": reason},
             result_summary=result.data.get("preview", "context compressed") if result.ok and isinstance(result.data, dict) else (result.error_message or "compression failed"),
+            reason=reason,
             ok=result.ok,
             error_type=result.error_type,
             error_message=result.error_message,
@@ -66,6 +67,7 @@ async def maybe_auto_compress(runtime: MissionRuntime, reason: str) -> None:
             "auto_compress_context",
             {"reason": reason},
             result_summary=result.data.get("preview", "automatic context compression") if isinstance(result.data, dict) else "automatic context compression",
+            reason=reason,
         )
     )
     runtime.context.tool_summaries.append("automatic context compression")

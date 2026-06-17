@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agent_platform.domain.models import ContextTransferPacket, MissionRequest, RuntimeContext
+from agent_platform.domain.models import MissionRequest, RuntimeContext
 
 
 def build_system_prompt(context: RuntimeContext) -> str:
@@ -9,10 +9,12 @@ def build_system_prompt(context: RuntimeContext) -> str:
         "You are a generic autonomous agent operating through explicit tools.",
         "Use the graph database, browser, and Kuzu documentation tools when needed.",
         "Keep intermediate reasoning concise and tool-oriented.",
+        f"Every tool call must include a short reason argument.",
         "Tool calls may return structured results with fields: ok, tool, error_type, error_message, retry_hint, data.",
         "If a tool returns ok=false, do not give up. Read the error, decide the next step, and continue if the mission is still solvable.",
         "For database lookup failures, prefer: inspect schema, reformulate the query, consult Kuzu reference, then use web or model knowledge if needed.",
-        "The browser_open tool accepts a batch of URLs and may return partial results if some URLs fail.",
+        f"The browser_open tool accepts a batch of URLs and may return partial results if some URLs fail.",
+        f"Web tool budget: {context.web_tool_budget()} browser calls per mission; used so far: {context.web_tool_calls_used}; remaining: {context.web_tool_calls_remaining()}.",
         "A compress_context tool exists. Use it when working memory has become large or repetitive.",
         "The original mission prompt always remains unchanged. Compressed working memory may replace older notes and is authoritative after compression.",
         "If a stronger model is necessary, call the model-switch tool with a short reason.",
@@ -27,10 +29,13 @@ def build_system_prompt(context: RuntimeContext) -> str:
     return "\n".join(prompt_lines)
 
 
-def build_handoff_prompt(packet: ContextTransferPacket, request: MissionRequest) -> str:
+def build_handoff_prompt(context: RuntimeContext) -> str:
+    packet = context.build_transfer_packet()
+    request = context.mission_request
     lines = [
         "Continue this mission from a previous model handoff.",
         f"Mission prompt: {request.prompt}",
+        f"Web tool budget remaining: {context.web_tool_calls_remaining()} of {context.web_tool_budget()} calls.",
         "Carry forward prior findings and finish the task.",
     ]
     if packet.notice:
@@ -47,4 +52,11 @@ def build_handoff_prompt(packet: ContextTransferPacket, request: MissionRequest)
     if packet.tool_summaries:
         lines.append("Tool summary:")
         lines.extend(f"- {item}" for item in packet.tool_summaries)
+    recent_calls = context.tool_calls[-10:]
+    if recent_calls:
+        lines.append("Recent tool reasons:")
+        lines.extend(
+            f"- {item.name}: {item.reason or item.arguments.get('reason', 'unspecified')}"
+            for item in recent_calls
+        )
     return "\n".join(lines)

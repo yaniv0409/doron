@@ -32,6 +32,19 @@ def test_record_browser_event_updates_runtime_events_and_progress_hook() -> None
 
 
 def _build_runtime() -> SimpleNamespace:
+    context = SimpleNamespace(
+        tool_calls=[],
+        tool_summaries=[],
+        browser_session_started=False,
+        web_findings=[],
+        web_artifacts=[],
+        reasoning_notes=[],
+        runtime_events=[],
+        web_tool_calls_used=0,
+        web_tool_call_budget=5,
+    )
+    context.web_tool_budget = lambda: context.web_tool_call_budget
+    context.web_tool_calls_remaining = lambda: context.web_tool_call_budget - context.web_tool_calls_used
     settings = SimpleNamespace(
         browser=SimpleNamespace(max_urls_per_batch=5, web_fetch_workers=2),
         compression=SimpleNamespace(enabled=False, tool_enabled=False),
@@ -39,14 +52,7 @@ def _build_runtime() -> SimpleNamespace:
     runtime = SimpleNamespace(
         browser=SimpleNamespace(),
         services=SimpleNamespace(settings=settings),
-        context=SimpleNamespace(
-            tool_calls=[],
-            tool_summaries=[],
-            browser_session_started=False,
-            web_findings=[],
-            web_artifacts=[],
-            reasoning_notes=[],
-        ),
+        context=context,
     )
     return runtime
 
@@ -84,7 +90,7 @@ def test_open_url_fetches_urls_in_parallel_and_preserves_order(monkeypatch) -> N
     monkeypatch.setattr(web_tools, "_fetch_url_worker", fake_worker)
     monkeypatch.setattr(web_tools, "maybe_auto_compress", noop)
 
-    result = asyncio.run(web_tools.open_url(runtime, [" https://a ", "https://a", "https://b"]))
+    result = asyncio.run(web_tools.open_url(runtime, [" https://a ", "https://a", "https://b"], "check the two URLs"))
 
     assert result.ok is True
     assert result.tool == "browser_open"
@@ -92,9 +98,13 @@ def test_open_url_fetches_urls_in_parallel_and_preserves_order(monkeypatch) -> N
     assert [item["requested_url"] for item in result.data["results"]] == ["https://a", "https://b"]
     assert result.data["successful_count"] == 1
     assert result.data["failed_count"] == 1
+    assert result.data["reason"] == "check the two URLs"
+    assert result.data["web_tool_calls_used"] == 1
+    assert result.data["web_tool_calls_remaining"] == 4
     assert len(started_threads) == 2
     assert runtime.context.tool_calls[0].name == "browser_open"
-    assert runtime.context.tool_calls[0].result_summary == "fetched 1/2 urls"
+    assert runtime.context.tool_calls[0].reason == "check the two URLs"
+    assert runtime.context.tool_calls[0].result_summary == "fetched 1/2 urls; web budget remaining 4"
 
 
 def test_open_url_enforces_batch_limit(monkeypatch) -> None:
@@ -106,8 +116,25 @@ def test_open_url_enforces_batch_limit(monkeypatch) -> None:
 
     monkeypatch.setattr(web_tools, "maybe_auto_compress", noop)
 
-    result = asyncio.run(web_tools.open_url(runtime, ["https://a", "https://b"]))
+    result = asyncio.run(web_tools.open_url(runtime, ["https://a", "https://b"], "inspect the pair"))
 
     assert result.ok is False
     assert result.error_type == "batch_limit_exceeded"
     assert runtime.context.tool_calls[0].error_type == "batch_limit_exceeded"
+
+
+def test_open_url_enforces_web_budget(monkeypatch) -> None:
+    runtime = _build_runtime()
+    runtime.context.web_tool_calls_used = runtime.context.web_tool_call_budget
+
+    async def noop(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(web_tools, "maybe_auto_compress", noop)
+
+    result = asyncio.run(web_tools.open_url(runtime, ["https://a"], "try once more"))
+
+    assert result.ok is False
+    assert result.error_type == "web_rate_limit_exceeded"
+    assert result.data["web_tool_calls_remaining"] == 0
+    assert runtime.context.tool_calls[0].reason == "try once more"

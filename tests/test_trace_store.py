@@ -21,11 +21,13 @@ def test_trace_store_round_trip_preserves_tool_calls_and_web_artifacts(tmp_path:
                 name="open_url",
                 arguments={"url": "https://example.com"},
                 result_summary="opened page",
+                reason="inspect example site",
             ),
             ToolCallRecord(
                 name="switch_model",
                 arguments={"target_model": "openai/gpt-5.2", "reason": "need stronger model"},
                 result_summary="requested switch",
+                reason="need stronger model",
             ),
         ],
         db_mutations=[],

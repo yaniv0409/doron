@@ -6,15 +6,18 @@ from typing import Any
 
 from agent_platform.application.live_events import emit_runtime_event
 from agent_platform.application.runtime_builder import MissionRuntime
-from agent_platform.config.settings import BrowserSettings
 from agent_platform.domain.exceptions import BrowserError
 from agent_platform.domain.models import ToolResult, WebArtifact, WebFetchBatchResult, WebFetchResult
+from agent_platform.infrastructure.browser import PlaywrightBrowserEngine
 from agent_platform.tools.compression_tools import maybe_auto_compress
 from agent_platform.tools.result_utils import build_tool_call, error_result, success_result
-from agent_platform.infrastructure.browser import PlaywrightBrowserEngine
 
 
-async def open_url(runtime: MissionRuntime, urls: list[str]) -> ToolResult:
+async def open_url(runtime: MissionRuntime, urls: list[str], reason: str) -> ToolResult:
+    reservation = _reserve_web_tool_call(runtime, "browser_open", reason, {"urls": urls})
+    if reservation is not None:
+        return reservation
+
     normalized_urls = _normalize_urls(urls)
     max_urls = runtime.services.settings.browser.max_urls_per_batch
     if not normalized_urls:
@@ -27,8 +30,9 @@ async def open_url(runtime: MissionRuntime, urls: list[str]) -> ToolResult:
         runtime.context.tool_calls.append(
             build_tool_call(
                 "browser_open",
-                {"urls": urls},
+                {"urls": urls, "reason": reason},
                 result_summary=result.error_message or "no urls provided",
+                reason=reason,
                 ok=False,
                 error_type=result.error_type,
                 error_message=result.error_message,
@@ -45,8 +49,9 @@ async def open_url(runtime: MissionRuntime, urls: list[str]) -> ToolResult:
         runtime.context.tool_calls.append(
             build_tool_call(
                 "browser_open",
-                {"urls": normalized_urls},
+                {"urls": normalized_urls, "reason": reason},
                 result_summary=result.error_message or "batch limit exceeded",
+                reason=reason,
                 ok=False,
                 error_type=result.error_type,
                 error_message=result.error_message,
@@ -62,23 +67,19 @@ async def open_url(runtime: MissionRuntime, urls: list[str]) -> ToolResult:
             "requested_urls": normalized_urls,
             "url_count": len(normalized_urls),
             "max_workers": _worker_limit(runtime.services.settings.browser, len(normalized_urls)),
+            "reason": reason,
+            "web_tool_calls_used": runtime.context.web_tool_calls_used,
+            "web_tool_calls_remaining": runtime.context.web_tool_calls_remaining(),
         },
     )
 
-    successful_count = 0
-    failed_count = 0
     worker_limit = _worker_limit(runtime.services.settings.browser, len(normalized_urls))
     browser_settings = _copy_browser_settings(runtime.services.settings.browser)
-    for index, url in enumerate(normalized_urls):
-        emit_runtime_event(
-            runtime.context,
-            "browser_fetch_started",
-            "browser fetch started",
-            {"requested_url": url, "index": index},
-        )
     results = _fetch_batch_sync(browser_settings, normalized_urls, worker_limit)
-    items = list(results)
-    for item in items:
+
+    successful_count = 0
+    failed_count = 0
+    for item in results:
         emit_runtime_event(
             runtime.context,
             "browser_fetch_completed" if item.ok else "browser_fetch_failed",
@@ -91,6 +92,7 @@ async def open_url(runtime: MissionRuntime, urls: list[str]) -> ToolResult:
                 "error_message": item.error_message,
                 "load_state": item.load_state,
                 "browser_stage": item.browser_stage,
+                "reason": reason,
             },
         )
         if item.ok:
@@ -111,11 +113,14 @@ async def open_url(runtime: MissionRuntime, urls: list[str]) -> ToolResult:
             failed_count += 1
 
     batch_result = WebFetchBatchResult(
+        reason=reason,
         requested_urls=normalized_urls,
-        results=[item for item in items if item is not None],
+        results=results,
         successful_count=successful_count,
         failed_count=failed_count,
         max_workers=worker_limit,
+        web_tool_calls_used=runtime.context.web_tool_calls_used,
+        web_tool_calls_remaining=runtime.context.web_tool_calls_remaining(),
     )
     emit_runtime_event(
         runtime.context,
@@ -126,20 +131,22 @@ async def open_url(runtime: MissionRuntime, urls: list[str]) -> ToolResult:
             "successful_count": successful_count,
             "failed_count": failed_count,
             "max_workers": worker_limit,
+            "reason": reason,
+            "web_tool_calls_used": runtime.context.web_tool_calls_used,
+            "web_tool_calls_remaining": runtime.context.web_tool_calls_remaining(),
         },
     )
     runtime.context.tool_calls.append(
         build_tool_call(
             "browser_open",
-            {"urls": normalized_urls},
-            result_summary=f"fetched {successful_count}/{len(normalized_urls)} urls",
+            {"urls": normalized_urls, "reason": reason},
+            result_summary=f"fetched {successful_count}/{len(normalized_urls)} urls; web budget remaining {runtime.context.web_tool_calls_remaining()}",
+            reason=reason,
         )
     )
     runtime.context.tool_summaries.append(
-        f"browser_open batch: {successful_count}/{len(normalized_urls)} urls",
+        f"browser_open batch: {successful_count}/{len(normalized_urls)} urls | reason: {reason}",
     )
-    if successful_count > 0:
-        await maybe_auto_compress(runtime, "web navigation expanded working memory")
     if successful_count == 0:
         return ToolResult(
             ok=False,
@@ -149,10 +156,14 @@ async def open_url(runtime: MissionRuntime, urls: list[str]) -> ToolResult:
             retry_hint="Split the batch, try different URLs, or continue without web data if possible.",
             data=batch_result.model_dump(mode="json"),
         )
+    await maybe_auto_compress(runtime, "web navigation expanded working memory")
     return success_result("browser_open", batch_result.model_dump(mode="json"))
 
 
-async def get_page_text(runtime: MissionRuntime) -> ToolResult:
+async def get_page_text(runtime: MissionRuntime, reason: str) -> ToolResult:
+    reservation = _reserve_web_tool_call(runtime, "browser_text", reason, {"reason": reason})
+    if reservation is not None:
+        return reservation
     try:
         snapshot = await runtime.browser.extract_text()
     except BrowserError as exc:
@@ -166,28 +177,33 @@ async def get_page_text(runtime: MissionRuntime) -> ToolResult:
         runtime.context.tool_calls.append(
             build_tool_call(
                 "get_page_text",
-                {},
+                {"reason": reason},
                 result_summary=result.error_message or "browser text extraction failed",
+                reason=reason,
                 ok=False,
                 error_type=result.error_type,
                 error_message=result.error_message,
             )
         )
-        runtime.context.tool_summaries.append("get_page_text failed")
+        runtime.context.tool_summaries.append(f"get_page_text failed | reason: {reason}")
         return result
     runtime.context.tool_calls.append(
         build_tool_call(
             "get_page_text",
-            {},
-            result_summary=f"extracted {len(snapshot.text)} chars",
+            {"reason": reason},
+            result_summary=f"extracted {len(snapshot.text)} chars; web budget remaining {runtime.context.web_tool_calls_remaining()}",
+            reason=reason,
         )
     )
-    runtime.context.tool_summaries.append("get_page_text")
+    runtime.context.tool_summaries.append(f"get_page_text | reason: {reason}")
     runtime.context.web_findings.append(f"Extracted page text: {len(snapshot.text)} chars")
     await maybe_auto_compress(runtime, "web text extraction expanded working memory")
     return success_result(
         "get_page_text",
         {
+            "reason": reason,
+            "web_tool_calls_used": runtime.context.web_tool_calls_used,
+            "web_tool_calls_remaining": runtime.context.web_tool_calls_remaining(),
             "url": snapshot.url,
             "title": snapshot.title,
             "text": snapshot.text,
@@ -197,11 +213,86 @@ async def get_page_text(runtime: MissionRuntime) -> ToolResult:
     )
 
 
-def _fetch_url_worker(settings: BrowserSettings, url: str) -> WebFetchResult:
+def _reserve_web_tool_call(
+    runtime: MissionRuntime,
+    tool_name: str,
+    reason: str,
+    arguments: dict[str, Any],
+) -> ToolResult | None:
+    budget = runtime.context.web_tool_budget()
+    used = runtime.context.web_tool_calls_used
+    if used >= budget:
+        runtime.context.tool_calls.append(
+            build_tool_call(
+                tool_name,
+                {**arguments, "reason": reason},
+                result_summary="web tool budget exhausted",
+                reason=reason,
+                ok=False,
+                error_type="web_rate_limit_exceeded",
+                error_message=f"web tool budget exhausted at {budget} calls per mission",
+            )
+        )
+        runtime.context.tool_summaries.append(f"{tool_name} blocked: web budget exhausted | reason: {reason}")
+        runtime.context.reasoning_notes.append(
+            "web budget exhausted; stop browsing and use memory or the database",
+        )
+        emit_runtime_event(
+            runtime.context,
+            "web_rate_limit_exceeded",
+            "web tool budget exhausted",
+            {
+                "tool": tool_name,
+                "reason": reason,
+                "web_tool_calls_used": used,
+                "web_tool_calls_remaining": 0,
+                "web_tool_budget": budget,
+            },
+        )
+        return ToolResult(
+            ok=False,
+            tool=tool_name,
+            error_type="web_rate_limit_exceeded",
+            error_message=f"web tool budget exhausted at {budget} calls per mission",
+            retry_hint="Continue using memory and the database. Stop browsing unless it is essential.",
+            data={
+                "reason": reason,
+                "web_tool_calls_used": used,
+                "web_tool_calls_remaining": 0,
+                "web_tool_budget": budget,
+            },
+        )
+    runtime.context.web_tool_calls_used += 1
+    emit_runtime_event(
+        runtime.context,
+        "web_budget_reserved",
+        "web tool call reserved",
+        {
+            "tool": tool_name,
+            "reason": reason,
+            "web_tool_calls_used": runtime.context.web_tool_calls_used,
+            "web_tool_calls_remaining": runtime.context.web_tool_calls_remaining(),
+            "web_tool_budget": budget,
+        },
+    )
+    return None
+
+
+def _fetch_batch_sync(
+    settings: Any,
+    urls: list[str],
+    worker_limit: int,
+) -> list[WebFetchResult]:
+    with ThreadPoolExecutor(max_workers=worker_limit, thread_name_prefix="web-fetch") as executor:
+        futures = [executor.submit(_fetch_url_worker, settings, url) for url in urls]
+        return [future.result() for future in futures]
+
+
+def _fetch_url_worker(settings: Any, url: str) -> WebFetchResult:
     return asyncio.run(_fetch_url_worker_async(settings, url))
 
 
-async def _fetch_url_worker_async(settings: BrowserSettings, url: str) -> WebFetchResult:
+async def _fetch_url_worker_async(settings: Any, url: str) -> WebFetchResult:
     browser = PlaywrightBrowserEngine(settings)
     try:
         snapshot = await browser.navigate(url)
@@ -236,16 +327,6 @@ async def _fetch_url_worker_async(settings: BrowserSettings, url: str) -> WebFet
         await browser.close()
 
 
-def _fetch_batch_sync(
-    settings: BrowserSettings,
-    urls: list[str],
-    worker_limit: int,
-) -> list[WebFetchResult]:
-    with ThreadPoolExecutor(max_workers=worker_limit, thread_name_prefix="web-fetch") as executor:
-        futures = [executor.submit(_fetch_url_worker, settings, url) for url in urls]
-        return [future.result() for future in futures]
-
-
 def _normalize_urls(urls: list[str]) -> list[str]:
     normalized: list[str] = []
     seen: set[str] = set()
@@ -258,11 +339,11 @@ def _normalize_urls(urls: list[str]) -> list[str]:
     return normalized
 
 
-def _worker_limit(settings: BrowserSettings, url_count: int) -> int:
+def _worker_limit(settings: Any, url_count: int) -> int:
     return max(1, min(settings.web_fetch_workers, url_count))
 
 
-def _copy_browser_settings(settings: BrowserSettings) -> BrowserSettings:
+def _copy_browser_settings(settings: Any) -> Any:
     if hasattr(settings, "model_copy"):
         return settings.model_copy(deep=True)
     return settings

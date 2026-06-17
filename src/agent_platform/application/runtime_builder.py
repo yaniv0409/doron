@@ -55,6 +55,7 @@ class RuntimeBuilder:
             started_at=utc_now(),
             current_model=current_model,
             allowed_models=allowed_models,
+            web_tool_call_budget=self._services.settings.browser.web_tool_call_budget,
         )
         db = KuzuGateway(request.db_path)
         browser = PlaywrightBrowserEngine(

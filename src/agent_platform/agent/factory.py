@@ -61,11 +61,12 @@ class AgentFactory:
         async def graph_read(
             ctx: RunContext[MissionRuntime],
             query: str,
+            reason: str,
             parameters: dict[str, Any] | None = None,
         ) -> ToolResult:
-            arguments = {"query": query, "parameters": parameters or {}}
+            arguments = {"query": query, "parameters": parameters or {}, "reason": reason}
             self._emit_tool_started(ctx.deps, "graph_read", arguments)
-            result = await read_graph(ctx.deps, query, parameters)
+            result = await read_graph(ctx.deps, query, reason, parameters)
             self._emit_tool_completed(ctx.deps, "graph_read", arguments, result)
             return result
         tool_names.append("graph_read")
@@ -75,54 +76,55 @@ class AgentFactory:
             async def graph_write(
                 ctx: RunContext[MissionRuntime],
                 query: str,
+                reason: str,
                 parameters: dict[str, Any] | None = None,
             ) -> ToolResult:
                 if not ctx.deps.context.mission_request.db_mutation_enabled:
                     raise ConfigurationError("database mutation is disabled for this mission")
-                arguments = {"query": query, "parameters": parameters or {}}
+                arguments = {"query": query, "parameters": parameters or {}, "reason": reason}
                 self._emit_tool_started(ctx.deps, "graph_write", arguments)
-                result = await write_graph(ctx.deps, query, parameters)
+                result = await write_graph(ctx.deps, query, reason, parameters)
                 self._emit_tool_completed(ctx.deps, "graph_write", arguments, result)
                 return result
             tool_names.append("graph_write")
 
         @agent.tool
-        async def graph_schema(ctx: RunContext[MissionRuntime]) -> ToolResult:
-            arguments: dict[str, Any] = {}
+        async def graph_schema(ctx: RunContext[MissionRuntime], reason: str) -> ToolResult:
+            arguments: dict[str, Any] = {"reason": reason}
             self._emit_tool_started(ctx.deps, "graph_schema", arguments)
-            result = await inspect_schema(ctx.deps)
+            result = await inspect_schema(ctx.deps, reason)
             self._emit_tool_completed(ctx.deps, "graph_schema", arguments, result)
             return result
         tool_names.append("graph_schema")
 
         @agent.tool
-        async def kuzu_reference(ctx: RunContext[MissionRuntime], query: str) -> ToolResult:
-            arguments = {"query": query}
+        async def kuzu_reference(ctx: RunContext[MissionRuntime], query: str, reason: str) -> ToolResult:
+            arguments = {"query": query, "reason": reason}
             self._emit_tool_started(ctx.deps, "kuzu_reference", arguments)
-            result = await lookup_kuzu_docs(ctx.deps, query)
+            result = await lookup_kuzu_docs(ctx.deps, query, reason)
             self._emit_tool_completed(ctx.deps, "kuzu_reference", arguments, result)
             return result
         tool_names.append("kuzu_reference")
 
         if not runtime.services.settings.debug.disable_browser_tools:
             @agent.tool
-            async def browser_open(ctx: RunContext[MissionRuntime], urls: list[str]) -> ToolResult:
+            async def browser_open(ctx: RunContext[MissionRuntime], urls: list[str], reason: str) -> ToolResult:
                 if not ctx.deps.context.mission_request.web_enabled:
                     raise ConfigurationError("web access is disabled for this mission")
-                arguments = {"urls": urls}
+                arguments = {"urls": urls, "reason": reason}
                 self._emit_tool_started(ctx.deps, "browser_open", arguments)
-                result = await open_url(ctx.deps, urls)
+                result = await open_url(ctx.deps, urls, reason)
                 self._emit_tool_completed(ctx.deps, "browser_open", arguments, result)
                 return result
             tool_names.append("browser_open")
 
             @agent.tool
-            async def browser_text(ctx: RunContext[MissionRuntime]) -> ToolResult:
+            async def browser_text(ctx: RunContext[MissionRuntime], reason: str) -> ToolResult:
                 if not ctx.deps.context.mission_request.web_enabled:
                     raise ConfigurationError("web access is disabled for this mission")
-                arguments: dict[str, Any] = {}
+                arguments: dict[str, Any] = {"reason": reason}
                 self._emit_tool_started(ctx.deps, "browser_text", arguments)
-                result = await get_page_text(ctx.deps)
+                result = await get_page_text(ctx.deps, reason)
                 self._emit_tool_completed(ctx.deps, "browser_text", arguments, result)
                 return result
             tool_names.append("browser_text")

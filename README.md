@@ -16,6 +16,7 @@ Web extraction behavior:
 - structured extracted links from the rendered page
 - batch `browser_open(urls)` fetches multiple URLs in parallel with a configurable worker pool
 - batch results preserve input order and may contain partial failures
+- browser tools are capped at 20 calls per mission by default, and every tool call carries a reason
 
 The codebase is organized for extension by both humans and coding agents:
 

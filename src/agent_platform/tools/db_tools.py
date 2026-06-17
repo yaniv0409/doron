@@ -12,6 +12,7 @@ from agent_platform.tools.result_utils import build_tool_call, error_result, suc
 async def read_graph(
     runtime: MissionRuntime,
     query: str,
+    reason: str,
     parameters: dict[str, Any] | None = None,
 ) -> ToolResult:
     try:
@@ -26,25 +27,27 @@ async def read_graph(
         runtime.context.tool_calls.append(
             build_tool_call(
                 "read_graph",
-                {"query": query, "parameters": parameters or {}},
+                {"query": query, "parameters": parameters or {}, "reason": reason},
                 result_summary=result.error_message or "database read failed",
+                reason=reason,
                 ok=False,
                 error_type=result.error_type,
                 error_message=result.error_message,
             )
         )
         runtime.context.db_findings.append(f"Read query failed: {result.error_message}")
-        runtime.context.tool_summaries.append(f"read_graph failed: {query[:160]}")
+        runtime.context.tool_summaries.append(f"read_graph failed: {query[:160]} | reason: {reason}")
         return result
     runtime.context.tool_calls.append(
         build_tool_call(
             "read_graph",
-            {"query": query, "parameters": parameters or {}},
+            {"query": query, "parameters": parameters or {}, "reason": reason},
             result_summary=f"returned {len(rows)} row(s)",
+            reason=reason,
         )
     )
     runtime.context.db_findings.append(f"Read query returned {len(rows)} row(s)")
-    runtime.context.tool_summaries.append(f"read_graph: {query[:160]}")
+    runtime.context.tool_summaries.append(f"read_graph: {query[:160]} | reason: {reason}")
     await maybe_auto_compress(runtime, "database read expanded working memory")
     return success_result("read_graph", rows)
 
@@ -52,6 +55,7 @@ async def read_graph(
 async def write_graph(
     runtime: MissionRuntime,
     query: str,
+    reason: str,
     parameters: dict[str, Any] | None = None,
 ) -> ToolResult:
     if runtime.context.db_checkpoint_path is None:
@@ -72,14 +76,15 @@ async def write_graph(
         runtime.context.tool_calls.append(
             build_tool_call(
                 "write_graph",
-                {"query": query, "parameters": parameters or {}},
+                {"query": query, "parameters": parameters or {}, "reason": reason},
                 result_summary=result.error_message or "database write failed",
+                reason=reason,
                 ok=False,
                 error_type=result.error_type,
                 error_message=result.error_message,
             )
         )
-        runtime.context.tool_summaries.append(f"write_graph failed: {query[:160]}")
+        runtime.context.tool_summaries.append(f"write_graph failed: {query[:160]} | reason: {reason}")
         return result
     summary = f"mutation executed, returned {len(rows)} row(s)"
     runtime.context.db_mutations.append(
@@ -92,16 +97,17 @@ async def write_graph(
     runtime.context.tool_calls.append(
         build_tool_call(
             "write_graph",
-            {"query": query, "parameters": parameters or {}},
+            {"query": query, "parameters": parameters or {}, "reason": reason},
             result_summary=summary,
+            reason=reason,
         )
     )
-    runtime.context.tool_summaries.append(f"write_graph: {query[:160]}")
+    runtime.context.tool_summaries.append(f"write_graph: {query[:160]} | reason: {reason}")
     await maybe_auto_compress(runtime, "database write expanded working memory")
     return success_result("write_graph", rows)
 
 
-async def inspect_schema(runtime: MissionRuntime) -> ToolResult:
+async def inspect_schema(runtime: MissionRuntime, reason: str) -> ToolResult:
     try:
         schema = runtime.db.get_schema()
     except DatabaseError as exc:
@@ -114,25 +120,27 @@ async def inspect_schema(runtime: MissionRuntime) -> ToolResult:
         runtime.context.tool_calls.append(
             build_tool_call(
                 "inspect_schema",
-                {},
+                {"reason": reason},
                 result_summary=result.error_message or "schema inspection failed",
+                reason=reason,
                 ok=False,
                 error_type=result.error_type,
                 error_message=result.error_message,
             )
         )
         runtime.context.db_findings.append(f"Schema inspection failed: {result.error_message}")
-        runtime.context.tool_summaries.append("inspect_schema failed")
+        runtime.context.tool_summaries.append(f"inspect_schema failed | reason: {reason}")
         return result
     runtime.context.tool_calls.append(
         build_tool_call(
             "inspect_schema",
-            {},
+            {"reason": reason},
             result_summary="schema returned",
+            reason=reason,
         )
     )
     runtime.context.db_findings.append(schema[:500])
-    runtime.context.tool_summaries.append("inspect_schema")
+    runtime.context.tool_summaries.append(f"inspect_schema | reason: {reason}")
     await maybe_auto_compress(runtime, "schema inspection expanded working memory")
     return success_result("inspect_schema", schema)
 

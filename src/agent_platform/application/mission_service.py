@@ -58,10 +58,7 @@ class MissionService:
                         "context refresh requested",
                         {"reason": exc.reason},
                     )
-                    prompt = build_handoff_prompt(
-                        runtime.context.build_transfer_packet(),
-                        request,
-                    )
+                    prompt = build_handoff_prompt(runtime.context)
                     runtime.context.reasoning_notes.append(
                         f"Context was refreshed and compressed: {exc.reason}",
                     )
@@ -84,10 +81,7 @@ class MissionService:
                         "model switched",
                         {"model": next_model.name},
                     )
-                    prompt = build_handoff_prompt(
-                        runtime.context.build_transfer_packet(),
-                        request,
-                    )
+                    prompt = build_handoff_prompt(runtime.context)
                     continue
                 try:
                     result, result_format = self._validator.validate(
@@ -111,10 +105,7 @@ class MissionService:
                         "Escalated model after output validation failure",
                     )
                     model_sequence.append(stronger.name)
-                    prompt = build_handoff_prompt(
-                        runtime.context.build_transfer_packet(),
-                        request,
-                    )
+                    prompt = build_handoff_prompt(runtime.context)
                     continue
                 completed_at = utc_now()
                 mission_result = MissionResult(

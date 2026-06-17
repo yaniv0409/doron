@@ -40,7 +40,7 @@ def build_runtime() -> SimpleNamespace:
 def test_read_graph_returns_recoverable_error_result() -> None:
     runtime = build_runtime()
 
-    result = asyncio.run(read_graph(runtime, "MATCH (c:Company) RETURN c"))
+    result = asyncio.run(read_graph(runtime, "MATCH (c:Company) RETURN c", "find Elon-related companies"))
 
     assert result.ok is False
     assert result.tool == "read_graph"
@@ -52,7 +52,7 @@ def test_read_graph_returns_recoverable_error_result() -> None:
 def test_inspect_schema_returns_recoverable_error_result() -> None:
     runtime = build_runtime()
 
-    result = asyncio.run(inspect_schema(runtime))
+    result = asyncio.run(inspect_schema(runtime, "check available graph tables"))
 
     assert result.ok is False
     assert result.tool == "inspect_schema"
@@ -62,7 +62,7 @@ def test_inspect_schema_returns_recoverable_error_result() -> None:
 def test_lookup_kuzu_docs_returns_recoverable_error_result() -> None:
     runtime = build_runtime()
 
-    result = asyncio.run(lookup_kuzu_docs(runtime, "companies"))
+    result = asyncio.run(lookup_kuzu_docs(runtime, "companies", "understand Kuzu table names"))
 
     assert result.ok is False
     assert result.tool == "lookup_kuzu_docs"

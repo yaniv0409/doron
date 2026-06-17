@@ -32,6 +32,7 @@ def test_apply_environment_loads_model_file_and_overrides_settings(tmp_path: Pat
         "AGENT_PLATFORM_BROWSER_TIMEOUT_MS": "15000",
         "AGENT_PLATFORM_BROWSER_NAVIGATION_TIMEOUT_MS": "15500",
         "AGENT_PLATFORM_BROWSER_NETWORK_IDLE_TIMEOUT_MS": "4000",
+        "AGENT_PLATFORM_BROWSER_WEB_TOOL_CALL_BUDGET": "20",
         "AGENT_PLATFORM_BROWSER_MAX_URLS_PER_BATCH": "3",
         "AGENT_PLATFORM_BROWSER_FETCH_WORKERS": "2",
         "AGENT_PLATFORM_BROWSER_MAX_LINKS_PER_PAGE": "50",
@@ -54,6 +55,7 @@ def test_apply_environment_loads_model_file_and_overrides_settings(tmp_path: Pat
     assert settings.browser.default_timeout_ms == 15000
     assert settings.browser.navigation_timeout_ms == 15500
     assert settings.browser.network_idle_timeout_ms == 4000
+    assert settings.browser.web_tool_call_budget == 20
     assert settings.browser.max_urls_per_batch == 3
     assert settings.browser.web_fetch_workers == 2
     assert settings.browser.max_links_per_page == 50

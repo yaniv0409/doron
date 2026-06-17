@@ -74,6 +74,11 @@ def apply_environment(settings: AppSettings, environ: dict[str, str] | os._Envir
     )
     _set_if_present(
         environ,
+        "AGENT_PLATFORM_BROWSER_WEB_TOOL_CALL_BUDGET",
+        lambda value: _setattr(settings.browser, "web_tool_call_budget", int(value)),
+    )
+    _set_if_present(
+        environ,
         "AGENT_PLATFORM_BROWSER_MAX_URLS_PER_BATCH",
         lambda value: _setattr(settings.browser, "max_urls_per_batch", int(value)),
     )
