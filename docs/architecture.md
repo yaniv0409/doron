@@ -18,10 +18,11 @@ Core runtime:
 - log all analytical activity to rotating files
 - persist trace artifacts for every mission
 - keep public contracts typed and stable
+- this is an evolving project, not production software; prefer deleting dead code over preserving compatibility layers
 
 ## Runtime flow
 
-1. FastAPI accepts a blocking mission request.
+1. FastAPI accepts a mission request and can return blocking JSON or streamed SSE.
 2. `MissionService` builds a mission-scoped runtime.
 3. `AgentFactory` creates a `pydantic-ai` agent for the current model.
 4. The agent uses explicit tools for graph work, browser work, documentation lookup, and model switching.

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from agent_platform.cli.api_client import MissionApiClient
-from agent_platform.contracts.api import MissionRunRequest, MissionRunResponse, MissionStreamEvent
+from agent_platform.contracts.api import MissionRunRequest, MissionStreamEvent
 
 
 @dataclass(slots=True)
@@ -41,17 +41,6 @@ class ChatSession:
     def stream_prompt(self, prompt: str) -> Iterator[MissionStreamEvent]:
         request = self._build_request(prompt)
         yield from self._client.stream_mission(request)
-
-    def run_prompt(self, prompt: str) -> tuple[MissionRunResponse, list[MissionStreamEvent]]:
-        response: MissionRunResponse | None = None
-        events: list[MissionStreamEvent] = []
-        for event in self.stream_prompt(prompt):
-            events.append(event)
-            if event.event in {"mission.completed", "mission.failed"}:
-                response = MissionRunResponse.model_validate(event.data)
-        if response is None:
-            raise RuntimeError("mission stream completed without a final response")
-        return response, events
 
     def _build_request(self, prompt: str) -> MissionRunRequest:
         return MissionRunRequest(

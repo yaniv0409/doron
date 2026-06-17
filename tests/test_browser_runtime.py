@@ -17,14 +17,14 @@ def test_record_browser_event_updates_runtime_events_and_progress_hook() -> None
         context,
         BrowserTelemetry(
             stage="browser_navigation",
-            message="network idle timeout fallback",
+            message="network idle timeout",
             metadata={"url": "https://example.com", "timeout_ms": 15000},
         ),
     )
 
     assert len(context.runtime_events) == 1
     assert context.runtime_events[0].phase == "browser_navigation"
-    assert context.runtime_events[0].message == "network idle timeout fallback"
+    assert context.runtime_events[0].message == "network idle timeout"
     assert progress_calls[0]["phase"] == "browser_navigation"
     assert progress_calls[0]["metadata"]["timeout_ms"] == 15000
 

@@ -60,7 +60,6 @@ async def open_url(runtime: MissionRuntime, url: str) -> ToolResult:
             "links": [item.model_dump() for item in snapshot.links],
             "load_state": snapshot.load_state,
         },
-        f"opened {snapshot.url}",
     )
 
 
@@ -106,5 +105,4 @@ async def get_page_text(runtime: MissionRuntime) -> ToolResult:
             "links": [item.model_dump() for item in snapshot.links],
             "load_state": snapshot.load_state,
         },
-        f"extracted {len(snapshot.text)} chars",
     )

@@ -5,7 +5,7 @@ from typing import Any
 from agent_platform.domain.models import ToolCallRecord, ToolResult
 
 
-def success_result(tool: str, data: Any, summary: str) -> ToolResult:
+def success_result(tool: str, data: Any) -> ToolResult:
     return ToolResult(
         ok=True,
         tool=tool,

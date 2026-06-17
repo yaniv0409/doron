@@ -24,7 +24,7 @@ Requirements:
 - mission-scoped browser lifecycle
 - look like a normal desktop browser session using built-in Playwright context settings
 - enforce a dedicated browser navigation timeout with a 15-second default
-- wait for `domcontentloaded` and then attempt `networkidle` with a bounded fallback
+- wait for `domcontentloaded` and then `networkidle`
 - extract readable main-content text with no HTML tags in the final text payload
 - return structured links with `text`, `href`, and optional `title`
 - log visited URLs and extraction summaries

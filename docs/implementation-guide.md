@@ -18,6 +18,7 @@
 - log with `trace_id`
 - persist request snapshots and final traces
 - treat the API as the stable user-facing control surface
+- this is an evolving repo, not a production compatibility layer; delete dead code instead of preserving shims
 
 ## High-value extension points
 

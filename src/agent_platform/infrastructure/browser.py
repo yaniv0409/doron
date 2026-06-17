@@ -1,25 +1,22 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from html import unescape
-from html.parser import HTMLParser
 from re import sub
-import asyncio
 from urllib.parse import urljoin
 
 from agent_platform.config.settings import BrowserSettings
-from agent_platform.domain.exceptions import BrowserError
+from agent_platform.domain.exceptions import BrowserError, ConfigurationError
 from agent_platform.domain.models import PageLink
 
 try:
     from bs4 import BeautifulSoup
-except ImportError:  # pragma: no cover
-    BeautifulSoup = None
-
-try:
-    from inscriptis import get_text as html_to_text
-except ImportError:  # pragma: no cover
-    html_to_text = None
+except ImportError as exc:  # pragma: no cover
+    raise ConfigurationError(
+        "beautifulsoup4 is required for browser extraction. Install it with `pip install -e \".[dev]\"` "
+        "or `pip install beautifulsoup4`."
+    ) from exc
 
 try:
     from playwright.async_api import Browser, Page, async_playwright
@@ -153,16 +150,22 @@ class PlaywrightBrowserEngine:
             )
             await self._emit("browser_navigation", "network idle reached", {"url": page.url})
             return "networkidle"
-        except Exception:
+        except asyncio.TimeoutError as exc:
             await self._emit(
                 "browser_navigation",
-                "network idle timeout fallback",
+                "network idle timeout",
                 {"url": page.url, "timeout_ms": self._settings.network_idle_timeout_ms},
             )
-            return "domcontentloaded_fallback"
+            raise BrowserError(
+                f"browser_timeout: network idle exceeded {self._settings.network_idle_timeout_ms}ms"
+            ) from exc
 
     async def _extract_snapshot(self, page: Page, load_state: str) -> PageSnapshot:
-        await self._emit("browser_extract", "snapshot extraction started", {"url": page.url, "load_state": load_state})
+        await self._emit(
+            "browser_extract",
+            "snapshot extraction started",
+            {"url": page.url, "load_state": load_state},
+        )
         title = await page.title()
         html = await page.content()
         scoped_html = select_main_html(
@@ -200,8 +203,6 @@ class PlaywrightBrowserEngine:
 def select_main_html(html: str, *, extract_main_content_only: bool) -> str:
     if not extract_main_content_only:
         return extract_body_html(html)
-    if BeautifulSoup is None:
-        return extract_body_html(html)
     soup = BeautifulSoup(html, "html.parser")
     for selector in ("main", "article", '[role="main"]'):
         node = soup.select_one(selector)
@@ -214,32 +215,16 @@ def select_main_html(html: str, *, extract_main_content_only: bool) -> str:
 
 
 def extract_body_html(html: str) -> str:
-    if BeautifulSoup is None:
-        return html
     soup = BeautifulSoup(html, "html.parser")
     return str(soup.body) if soup.body is not None else html
 
 
 def clean_text_from_html(html: str, max_chars: int) -> str:
-    if html_to_text is not None:
-        text = html_to_text(html)
-    elif BeautifulSoup is not None:
-        text = BeautifulSoup(html, "html.parser").get_text("\n", strip=True)
-    else:
-        text = _strip_tags(html)
-    text = _normalize_text(text)
-    return text[:max_chars]
+    text = BeautifulSoup(html, "html.parser").get_text("\n", strip=True)
+    return _normalize_text(text)[:max_chars]
 
 
 def extract_links_from_html(html: str, *, base_url: str, max_links: int) -> list[PageLink]:
-    if BeautifulSoup is not None:
-        return _extract_links_with_bs4(html, base_url=base_url, max_links=max_links)
-    parser = AnchorCollector(base_url=base_url, max_links=max_links)
-    parser.feed(html)
-    return parser.links
-
-
-def _extract_links_with_bs4(html: str, *, base_url: str, max_links: int) -> list[PageLink]:
     soup = BeautifulSoup(html, "html.parser")
     links: list[PageLink] = []
     seen: set[str] = set()
@@ -273,53 +258,3 @@ def _normalize_text(text: str) -> str:
     cleaned = sub(r"\n{3,}", "\n\n", cleaned)
     cleaned = sub(r"[ \t]{2,}", " ", cleaned)
     return cleaned.strip()
-
-
-def _strip_tags(html: str) -> str:
-    no_scripts = sub(r"(?is)<(script|style).*?>.*?</\\1>", " ", html)
-    no_tags = sub(r"(?s)<[^>]+>", " ", no_scripts)
-    return no_tags
-
-
-class AnchorCollector(HTMLParser):
-    def __init__(self, *, base_url: str, max_links: int) -> None:
-        super().__init__()
-        self._base_url = base_url
-        self._max_links = max_links
-        self._seen: set[str] = set()
-        self._current_href: str | None = None
-        self._current_title: str | None = None
-        self._current_text: list[str] = []
-        self.links: list[PageLink] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag != "a" or len(self.links) >= self._max_links:
-            return
-        attr_map = dict(attrs)
-        href = normalize_href(attr_map.get("href") or "", self._base_url)
-        if not href or href in self._seen:
-            self._current_href = None
-            return
-        self._current_href = href
-        self._current_title = attr_map.get("title")
-        self._current_text = []
-
-    def handle_data(self, data: str) -> None:
-        if self._current_href is not None:
-            self._current_text.append(data)
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag != "a" or self._current_href is None:
-            return
-        self._seen.add(self._current_href)
-        text = _normalize_text(" ".join(self._current_text))
-        self.links.append(
-            PageLink(
-                text=text or self._current_href,
-                href=self._current_href,
-                title=self._current_title,
-            )
-        )
-        self._current_href = None
-        self._current_title = None
-        self._current_text = []

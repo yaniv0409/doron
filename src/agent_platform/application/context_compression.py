@@ -64,7 +64,6 @@ class ContextCompressor:
                 "size_after": runtime.context.estimate_working_memory_size(),
                 "preview": preview,
             },
-            "context compressed",
         )
 
     def should_auto_compress(self, runtime: MissionRuntime) -> bool:

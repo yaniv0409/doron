@@ -9,7 +9,7 @@ Generic agent platform scaffold built around:
 
 Web extraction behavior:
 
-- Playwright navigation with `domcontentloaded` plus `networkidle` fallback
+- Playwright navigation with `domcontentloaded` and `networkidle`
 - dedicated 15-second browser navigation timeout by default, configurable through environment
 - browser context configured to look like a normal desktop session
 - cleaned readable page text without HTML tags
@@ -22,6 +22,7 @@ The codebase is organized for extension by both humans and coding agents:
 - rolling audit logs
 - mission traces persisted to disk
 - documentation in `docs/`
+- this is an evolving project, not a production compatibility target; prefer deleting dead code over preserving shims
 
 ## Quick start
 
@@ -109,4 +110,4 @@ After each prompt, the terminal prints:
 If `/help`, `/config`, `/exit`, or `/quit` is entered as the first line, it is treated as a command. Once a multiline prompt is in progress, slash-prefixed lines are treated as normal prompt text.
 
 Tool usage is streamed live from the API as tool events, traced canonically in `traces/<trace_id>/trace.json`, and also written to rolling logs under `logs/`.
-Live execution progress is written to `traces/<trace_id>/progress.json`, including browser-stage events such as navigation start, `domcontentloaded`, `networkidle`, fallback, timeout, and extraction.
+Live execution progress is written to `traces/<trace_id>/progress.json`, including browser-stage events such as navigation start, `domcontentloaded`, `networkidle`, timeout, and extraction.

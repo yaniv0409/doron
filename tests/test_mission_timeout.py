@@ -49,7 +49,7 @@ def test_mission_service_times_out_and_writes_progress(tmp_path: Path) -> None:
     )
     request = MissionRequest(prompt="hang", db_path="/tmp/db.kuzu")
 
-    result = service.run_sync(request)
+    result = asyncio.run(service.run(request))
 
     assert result.status.value == "failed"
     assert result.error is not None

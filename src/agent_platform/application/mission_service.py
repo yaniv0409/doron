@@ -26,9 +26,6 @@ class MissionService:
         self._docs_logger = get_logger(LogCategory.DOCS_AUDIT.value)
         self._web_logger = get_logger(LogCategory.WEB_AUDIT.value)
 
-    def run_sync(self, request: MissionRequest) -> MissionResult:
-        return asyncio.run(self.run(request))
-
     async def run(self, request: MissionRequest, *, event_hook: Any | None = None) -> MissionResult:
         runtime = self._runtime_builder.build(request)
         runtime.context.progress_hook = lambda **kwargs: self._write_progress(runtime, **kwargs)

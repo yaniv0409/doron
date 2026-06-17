@@ -46,7 +46,7 @@ async def read_graph(
     runtime.context.db_findings.append(f"Read query returned {len(rows)} row(s)")
     runtime.context.tool_summaries.append(f"read_graph: {query[:160]}")
     await maybe_auto_compress(runtime, "database read expanded working memory")
-    return success_result("read_graph", rows, f"returned {len(rows)} row(s)")
+    return success_result("read_graph", rows)
 
 
 async def write_graph(
@@ -98,7 +98,7 @@ async def write_graph(
     )
     runtime.context.tool_summaries.append(f"write_graph: {query[:160]}")
     await maybe_auto_compress(runtime, "database write expanded working memory")
-    return success_result("write_graph", rows, summary)
+    return success_result("write_graph", rows)
 
 
 async def inspect_schema(runtime: MissionRuntime) -> ToolResult:
@@ -134,7 +134,7 @@ async def inspect_schema(runtime: MissionRuntime) -> ToolResult:
     runtime.context.db_findings.append(schema[:500])
     runtime.context.tool_summaries.append("inspect_schema")
     await maybe_auto_compress(runtime, "schema inspection expanded working memory")
-    return success_result("inspect_schema", schema, "schema returned")
+    return success_result("inspect_schema", schema)
 
 
 def classify_database_error(message: str) -> str:

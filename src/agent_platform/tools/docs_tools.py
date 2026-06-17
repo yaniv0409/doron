@@ -49,5 +49,4 @@ async def lookup_kuzu_docs(runtime: MissionRuntime, query: str) -> ToolResult:
     return success_result(
         "lookup_kuzu_docs",
         f"[{section.title}]\n{excerpt}",
-        f"matched {section.source_id}",
     )
