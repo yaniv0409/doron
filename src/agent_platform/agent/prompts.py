@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from typing import Any
+
 from agent_platform.domain.models import MissionRequest, RuntimeContext
 
 
@@ -18,9 +21,8 @@ def build_system_prompt(context: RuntimeContext) -> str:
         "A compress_context tool exists. Use it when working memory has become large or repetitive.",
         "The original mission prompt always remains unchanged. Compressed working memory may replace older notes and is authoritative after compression.",
         "If a stronger model is necessary, call the model-switch tool with a short reason.",
-        "If an output schema exists, return only valid JSON matching the schema.",
-        "If no output schema exists, return concise plain text.",
     ]
+    prompt_lines.extend(_build_output_format_lines(request.output_schema))
     if not request.db_mutation_enabled:
         prompt_lines.append("Do not mutate the graph database.")
     if not request.web_enabled:
@@ -59,4 +61,36 @@ def build_handoff_prompt(context: RuntimeContext) -> str:
             f"- {item.name}: {item.reason or item.arguments.get('reason', 'unspecified')}"
             for item in recent_calls
         )
+    lines.extend(_build_output_format_lines(request.output_schema))
     return "\n".join(lines)
+
+
+def build_output_repair_prompt(context: RuntimeContext, raw_output: str, validation_error: str) -> str:
+    request = context.mission_request
+    lines = [
+        "The previous answer was invalid.",
+        "Return only valid JSON that matches the output schema below.",
+        "Do not include markdown, code fences, or explanations.",
+        f"Validation error: {validation_error}",
+        f"Mission prompt: {request.prompt}",
+    ]
+    lines.extend(_build_output_format_lines(request.output_schema))
+    lines.append("Previous invalid output:")
+    lines.append(_truncate(raw_output, 2000))
+    return "\n".join(lines)
+
+
+def _build_output_format_lines(schema: dict[str, Any] | None) -> list[str]:
+    if schema is None:
+        return ["If no output schema exists, return concise plain text."]
+    return [
+        "If an output schema exists, return only valid JSON matching the schema.",
+        "Output schema:",
+        json.dumps(schema, ensure_ascii=False, indent=2, sort_keys=True),
+    ]
+
+
+def _truncate(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}\n...[truncated]"

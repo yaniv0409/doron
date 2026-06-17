@@ -4,7 +4,7 @@ import asyncio
 from typing import Any
 
 from agent_platform.agent.factory import AgentFactory
-from agent_platform.agent.prompts import build_handoff_prompt
+from agent_platform.agent.prompts import build_handoff_prompt, build_output_repair_prompt
 from agent_platform.application.result_validation import ResultValidator
 from agent_platform.application.live_events import emit_runtime_event, emit_stream_event
 from agent_platform.application.runtime_builder import MissionRuntime, RuntimeBuilder
@@ -89,24 +89,40 @@ class MissionService:
                         request.output_schema,
                     )
                 except OutputValidationError as exc:
-                    stronger = self._runtime_builder.services.model_catalog.next_stronger(
-                        runtime.context.current_model.name,
-                        runtime.context.allowed_models,
-                    )
-                    if stronger is None:
+                    repair_prompt = build_output_repair_prompt(runtime.context, raw_output, str(exc))
+                    raw_output = await self._run_once(runtime, repair_prompt)
+                    if runtime.context.pending_model_switch:
+                        next_model = self._promote_model(runtime, runtime.context.pending_model_switch)
+                        if next_model is None:
+                            return await self._fail(
+                                runtime,
+                                model_sequence,
+                                "invalid_model_switch",
+                                "requested model switch is not allowed",
+                            )
+                        runtime.context.current_model = next_model
+                        runtime.context.pending_model_switch = None
+                        model_sequence.append(next_model.name)
+                        self._append_runtime_event(
+                            runtime,
+                            "model_switch",
+                            "model switched",
+                            {"model": next_model.name},
+                        )
+                        prompt = build_handoff_prompt(runtime.context)
+                        continue
+                    try:
+                        result, result_format = self._validator.validate(
+                            raw_output,
+                            request.output_schema,
+                        )
+                    except OutputValidationError as repair_exc:
                         return await self._fail(
                             runtime,
                             model_sequence,
                             "output_validation_error",
-                            str(exc),
+                            str(repair_exc),
                         )
-                    runtime.context.current_model = stronger
-                    runtime.context.reasoning_notes.append(
-                        "Escalated model after output validation failure",
-                    )
-                    model_sequence.append(stronger.name)
-                    prompt = build_handoff_prompt(runtime.context)
-                    continue
                 completed_at = utc_now()
                 mission_result = MissionResult(
                     status=MissionStatus.COMPLETED,
