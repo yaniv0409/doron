@@ -79,6 +79,10 @@ Receive:
 
 Stream mode emits live mission progress, tool events, and the final result over SSE from the same endpoint.
 
+`POST /db/contents`
+
+Read-only database snapshot endpoint for end apps. It discovers whatever tables exist in a Kuzu database file given in `db_path` and returns a generic `tables` snapshot with optional schema, counts, connections, and bounded sample rows.
+
 See `docs/` for architecture and implementation details.
 
 ## Terminal chat
