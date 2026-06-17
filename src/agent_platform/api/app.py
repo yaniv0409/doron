@@ -9,6 +9,8 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from agent_platform.api.db import router as db_router
+from agent_platform.application.db_snapshot_service import DbSnapshotService
 from agent_platform.application.mission_service import MissionService
 from agent_platform.config.loader import load_settings
 from agent_platform.contracts.api import MissionRunRequest, MissionStreamEvent
@@ -30,7 +32,9 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Agent Platform", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.mission_service = MissionService(settings)
+    app.state.db_contents_service = DbSnapshotService()
     app.state.logger = get_logger(LogCategory.API.value)
+    app.include_router(db_router)
     _register_routes(app)
     return app
 
