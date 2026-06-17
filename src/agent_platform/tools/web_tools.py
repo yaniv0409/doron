@@ -6,7 +6,7 @@ from typing import Any
 
 from agent_platform.application.live_events import emit_runtime_event
 from agent_platform.application.runtime_builder import MissionRuntime
-from agent_platform.domain.exceptions import BrowserError
+from agent_platform.domain.exceptions import BrowserError, ContextRefreshRequested, ModelSwitchRequested
 from agent_platform.domain.models import ToolResult, WebArtifact, WebFetchBatchResult, WebFetchResult
 from agent_platform.infrastructure.browser import PlaywrightBrowserEngine
 from agent_platform.tools.compression_tools import maybe_auto_compress
@@ -75,7 +75,40 @@ async def open_url(runtime: MissionRuntime, urls: list[str], reason: str) -> Too
 
     worker_limit = _worker_limit(runtime.services.settings.browser, len(normalized_urls))
     browser_settings = _copy_browser_settings(runtime.services.settings.browser)
-    results = _fetch_batch_sync(browser_settings, normalized_urls, worker_limit)
+    try:
+        results = _fetch_batch_sync(browser_settings, normalized_urls, worker_limit)
+    except BrowserError as exc:
+        result = error_result(
+            "browser_open",
+            "browser_runtime_error",
+            str(exc),
+            "Split the batch, try a different URL, or continue without web data if possible.",
+        )
+        _record_browser_failure(
+            runtime,
+            "browser_open",
+            {"urls": normalized_urls, "reason": reason},
+            reason,
+            result,
+        )
+        return result
+    except Exception as exc:  # pragma: no cover
+        if _is_control_flow_exception(exc):
+            raise
+        result = error_result(
+            "browser_open",
+            "browser_runtime_error",
+            str(exc),
+            "Split the batch, try a different URL, or continue without web data if possible.",
+        )
+        _record_browser_failure(
+            runtime,
+            "browser_open",
+            {"urls": normalized_urls, "reason": reason},
+            reason,
+            result,
+        )
+        return result
 
     successful_count = 0
     failed_count = 0
@@ -169,23 +202,23 @@ async def get_page_text(runtime: MissionRuntime, reason: str) -> ToolResult:
     except BrowserError as exc:
         error_type = "browser_timeout" if "browser_timeout:" in str(exc) else "browser_extract_error"
         result = error_result(
-            "get_page_text",
+            "browser_text",
             error_type,
             str(exc),
             "Open a page first or continue without web text if the answer is still possible.",
         )
-        runtime.context.tool_calls.append(
-            build_tool_call(
-                "get_page_text",
-                {"reason": reason},
-                result_summary=result.error_message or "browser text extraction failed",
-                reason=reason,
-                ok=False,
-                error_type=result.error_type,
-                error_message=result.error_message,
-            )
+        _record_browser_text_failure(runtime, reason, result)
+        return result
+    except Exception as exc:  # pragma: no cover
+        if _is_control_flow_exception(exc):
+            raise
+        result = error_result(
+            "browser_text",
+            "browser_runtime_error",
+            str(exc),
+            "Open a page first or continue without web text if the answer is still possible.",
         )
-        runtime.context.tool_summaries.append(f"get_page_text failed | reason: {reason}")
+        _record_browser_text_failure(runtime, reason, result)
         return result
     runtime.context.tool_calls.append(
         build_tool_call(
@@ -347,3 +380,43 @@ def _copy_browser_settings(settings: Any) -> Any:
     if hasattr(settings, "model_copy"):
         return settings.model_copy(deep=True)
     return settings
+
+
+def _record_browser_failure(
+    runtime: MissionRuntime,
+    tool_name: str,
+    arguments: dict[str, Any],
+    reason: str,
+    result: ToolResult,
+) -> None:
+    runtime.context.tool_calls.append(
+        build_tool_call(
+            tool_name,
+            arguments,
+            result_summary=result.error_message or "browser request failed",
+            reason=reason,
+            ok=False,
+            error_type=result.error_type,
+            error_message=result.error_message,
+        )
+    )
+    runtime.context.tool_summaries.append(f"{tool_name} failed | reason: {reason}")
+
+
+def _record_browser_text_failure(runtime: MissionRuntime, reason: str, result: ToolResult) -> None:
+    runtime.context.tool_calls.append(
+        build_tool_call(
+            "get_page_text",
+            {"reason": reason},
+            result_summary=result.error_message or "browser text extraction failed",
+            reason=reason,
+            ok=False,
+            error_type=result.error_type,
+            error_message=result.error_message,
+        )
+    )
+    runtime.context.tool_summaries.append(f"get_page_text failed | reason: {reason}")
+
+
+def _is_control_flow_exception(exc: Exception) -> bool:
+    return isinstance(exc, (ContextRefreshRequested, ModelSwitchRequested, asyncio.CancelledError))

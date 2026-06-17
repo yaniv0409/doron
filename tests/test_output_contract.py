@@ -5,7 +5,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from agent_platform.agent import factory as factory_module
 from agent_platform.agent.factory import AgentFactory
@@ -49,8 +49,9 @@ def test_build_output_type_returns_structured_dict() -> None:
     output_type = build_output_type(schema)
 
     assert output_type is not None
-    assert getattr(output_type, "__is_model_like__", False) is True
-    assert TypeAdapter(output_type).validate_python({"answer": "ok", "score": 1.5}) == {
+    assert issubclass(output_type, BaseModel)
+    validated = TypeAdapter(output_type).validate_python({"answer": "ok", "score": 1.5})
+    assert validated.model_dump(mode="json") == {
         "answer": "ok",
         "score": 1.5,
     }
@@ -112,8 +113,9 @@ def test_agent_factory_passes_structured_output_type() -> None:
     assert isinstance(session.runtime.context, RuntimeContext)
     assert "output_type" in captured["kwargs"]
     output_type = captured["kwargs"]["output_type"]
-    assert getattr(output_type, "__is_model_like__", False) is True
-    assert TypeAdapter(output_type).validate_python({"answer": "ok"}) == {"answer": "ok"}
+    assert issubclass(output_type, BaseModel)
+    validated = TypeAdapter(output_type).validate_python({"answer": "ok"})
+    assert validated.model_dump(mode="json") == {"answer": "ok"}
 
 
 def test_prompt_builders_keep_structured_output_hint_after_refresh() -> None:

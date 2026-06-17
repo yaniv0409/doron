@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from agent_platform.application.runtime_builder import MissionRuntime
-from agent_platform.domain.exceptions import DatabaseError
+from agent_platform.domain.exceptions import ContextRefreshRequested, DatabaseError, ModelSwitchRequested
 from agent_platform.domain.models import DbMutationRecord, ToolResult
 from agent_platform.tools.compression_tools import maybe_auto_compress
 from agent_platform.tools.result_utils import build_tool_call, error_result, success_result
@@ -24,19 +25,32 @@ async def read_graph(
             str(exc),
             retry_hint_for_database_error(str(exc)),
         )
-        runtime.context.tool_calls.append(
-            build_tool_call(
-                "read_graph",
-                {"query": query, "parameters": parameters or {}, "reason": reason},
-                result_summary=result.error_message or "database read failed",
-                reason=reason,
-                ok=False,
-                error_type=result.error_type,
-                error_message=result.error_message,
-            )
+        _record_database_tool_failure(
+            runtime,
+            "read_graph",
+            {"query": query, "parameters": parameters or {}, "reason": reason},
+            reason,
+            result,
+            f"read_graph failed: {query[:160]} | reason: {reason}",
         )
-        runtime.context.db_findings.append(f"Read query failed: {result.error_message}")
-        runtime.context.tool_summaries.append(f"read_graph failed: {query[:160]} | reason: {reason}")
+        return result
+    except Exception as exc:  # pragma: no cover
+        if _is_control_flow_exception(exc):
+            raise
+        result = error_result(
+            "read_graph",
+            "database_runtime_error",
+            str(exc),
+            "Review the query, inspect the schema, and try a smaller read.",
+        )
+        _record_database_tool_failure(
+            runtime,
+            "read_graph",
+            {"query": query, "parameters": parameters or {}, "reason": reason},
+            reason,
+            result,
+            f"read_graph failed: {query[:160]} | reason: {reason}",
+        )
         return result
     runtime.context.tool_calls.append(
         build_tool_call(
@@ -73,18 +87,32 @@ async def write_graph(
             str(exc),
             retry_hint_for_database_error(str(exc)),
         )
-        runtime.context.tool_calls.append(
-            build_tool_call(
-                "write_graph",
-                {"query": query, "parameters": parameters or {}, "reason": reason},
-                result_summary=result.error_message or "database write failed",
-                reason=reason,
-                ok=False,
-                error_type=result.error_type,
-                error_message=result.error_message,
-            )
+        _record_database_tool_failure(
+            runtime,
+            "write_graph",
+            {"query": query, "parameters": parameters or {}, "reason": reason},
+            reason,
+            result,
+            f"write_graph failed: {query[:160]} | reason: {reason}",
         )
-        runtime.context.tool_summaries.append(f"write_graph failed: {query[:160]} | reason: {reason}")
+        return result
+    except Exception as exc:  # pragma: no cover
+        if _is_control_flow_exception(exc):
+            raise
+        result = error_result(
+            "write_graph",
+            "database_runtime_error",
+            str(exc),
+            "Review the query, inspect the schema, and try a smaller mutation.",
+        )
+        _record_database_tool_failure(
+            runtime,
+            "write_graph",
+            {"query": query, "parameters": parameters or {}, "reason": reason},
+            reason,
+            result,
+            f"write_graph failed: {query[:160]} | reason: {reason}",
+        )
         return result
     summary = f"mutation executed, returned {len(rows)} row(s)"
     runtime.context.db_mutations.append(
@@ -117,19 +145,32 @@ async def inspect_schema(runtime: MissionRuntime, reason: str) -> ToolResult:
             str(exc),
             "Consult Kuzu reference and retry schema inspection with a simpler query.",
         )
-        runtime.context.tool_calls.append(
-            build_tool_call(
-                "inspect_schema",
-                {"reason": reason},
-                result_summary=result.error_message or "schema inspection failed",
-                reason=reason,
-                ok=False,
-                error_type=result.error_type,
-                error_message=result.error_message,
-            )
+        _record_database_tool_failure(
+            runtime,
+            "inspect_schema",
+            {"reason": reason},
+            reason,
+            result,
+            f"inspect_schema failed | reason: {reason}",
         )
-        runtime.context.db_findings.append(f"Schema inspection failed: {result.error_message}")
-        runtime.context.tool_summaries.append(f"inspect_schema failed | reason: {reason}")
+        return result
+    except Exception as exc:  # pragma: no cover
+        if _is_control_flow_exception(exc):
+            raise
+        result = error_result(
+            "inspect_schema",
+            "database_runtime_error",
+            str(exc),
+            "Consult Kuzu reference and retry schema inspection with a simpler query.",
+        )
+        _record_database_tool_failure(
+            runtime,
+            "inspect_schema",
+            {"reason": reason},
+            reason,
+            result,
+            f"inspect_schema failed | reason: {reason}",
+        )
         return result
     runtime.context.tool_calls.append(
         build_tool_call(
@@ -166,3 +207,35 @@ def retry_hint_for_database_error(message: str) -> str:
     if error_type == "database_missing_object":
         return "Inspect the schema first, then retry with existing table or relationship names."
     return "Review the query, inspect the schema, and consult Kuzu reference before retrying."
+
+
+def _record_database_tool_failure(
+    runtime: MissionRuntime,
+    tool_name: str,
+    arguments: dict[str, Any],
+    reason: str,
+    result: ToolResult,
+    summary: str,
+) -> None:
+    runtime.context.tool_calls.append(
+        build_tool_call(
+            tool_name,
+            arguments,
+            result_summary=result.error_message or summary,
+            reason=reason,
+            ok=False,
+            error_type=result.error_type,
+            error_message=result.error_message,
+        )
+    )
+    if tool_name == "read_graph":
+        runtime.context.db_findings.append(f"Read query failed: {result.error_message}")
+    elif tool_name == "write_graph":
+        runtime.context.db_findings.append(f"Write query failed: {result.error_message}")
+    elif tool_name == "inspect_schema":
+        runtime.context.db_findings.append(f"Schema inspection failed: {result.error_message}")
+    runtime.context.tool_summaries.append(summary)
+
+
+def _is_control_flow_exception(exc: Exception) -> bool:
+    return isinstance(exc, (ContextRefreshRequested, ModelSwitchRequested, asyncio.CancelledError))

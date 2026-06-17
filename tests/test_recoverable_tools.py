@@ -2,10 +2,13 @@ import asyncio
 from types import SimpleNamespace
 
 from agent_platform.agent.prompts import build_system_prompt
+from agent_platform.config.settings import AppSettings
 from agent_platform.domain.exceptions import DatabaseError, DocumentationError
 from agent_platform.domain.models import MissionRequest, ModelDescriptor, RuntimeContext, utc_now
+from agent_platform.tools import web_tools
 from agent_platform.tools.db_tools import inspect_schema, read_graph
 from agent_platform.tools.docs_tools import lookup_kuzu_docs
+from agent_platform.tools.web_tools import get_page_text, open_url
 
 
 class FailingDb:
@@ -31,6 +34,7 @@ def build_runtime() -> SimpleNamespace:
         allowed_models=[ModelDescriptor(name="openai/gpt-4.1-mini", rank=10)],
     )
     services = SimpleNamespace(
+        settings=AppSettings(),
         docs_repository=FailingDocsRepository(),
         trace_store=SimpleNamespace(create_checkpoint=lambda *_args, **_kwargs: "/tmp/checkpoint"),
     )
@@ -67,6 +71,62 @@ def test_lookup_kuzu_docs_returns_recoverable_error_result() -> None:
     assert result.ok is False
     assert result.tool == "lookup_kuzu_docs"
     assert result.error_type == "docs_lookup_error"
+
+
+def test_read_graph_returns_runtime_error_result() -> None:
+    class RuntimeFailingDb(FailingDb):
+        def execute(self, query: str, parameters=None):
+            raise RuntimeError("database driver exploded")
+
+    runtime = build_runtime()
+    runtime.db = RuntimeFailingDb()
+
+    result = asyncio.run(read_graph(runtime, "MATCH (c:Company) RETURN c", "find Elon-related companies"))
+
+    assert result.ok is False
+    assert result.error_type == "database_runtime_error"
+
+
+def test_lookup_kuzu_docs_returns_runtime_error_result() -> None:
+    class RuntimeFailingDocsRepository(FailingDocsRepository):
+        def lookup(self, query: str):
+            raise RuntimeError("docs parser exploded")
+
+    runtime = build_runtime()
+    runtime.services.docs_repository = RuntimeFailingDocsRepository()
+
+    result = asyncio.run(lookup_kuzu_docs(runtime, "companies", "understand Kuzu table names"))
+
+    assert result.ok is False
+    assert result.error_type == "docs_runtime_error"
+
+
+def test_get_page_text_returns_runtime_error_result() -> None:
+    class RuntimeFailingBrowser:
+        async def extract_text(self):
+            raise RuntimeError("browser extractor exploded")
+
+    runtime = build_runtime()
+    runtime.browser = RuntimeFailingBrowser()
+
+    result = asyncio.run(get_page_text(runtime, "inspect current page"))
+
+    assert result.ok is False
+    assert result.error_type == "browser_runtime_error"
+
+
+def test_open_url_returns_runtime_error_result(monkeypatch) -> None:
+    runtime = build_runtime()
+
+    def fail_batch_sync(*args, **kwargs):
+        raise RuntimeError("batch fetch exploded")
+
+    monkeypatch.setattr(web_tools, "_fetch_batch_sync", fail_batch_sync)
+
+    result = asyncio.run(open_url(runtime, ["https://example.com"], "search the web"))
+
+    assert result.ok is False
+    assert result.error_type == "browser_runtime_error"
 
 
 def test_system_prompt_instructs_agent_to_continue_after_tool_failure() -> None:
