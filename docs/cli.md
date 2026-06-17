@@ -12,12 +12,14 @@ If `--db-path` is omitted, the CLI prompts for it at startup.
 If the path does not exist, the runtime creates a new Kuzu database at that location.
 The terminal talks to the API over HTTP and uses the streamed mission mode by default.
 Prompts are multiline by default: type lines freely and submit the mission with a blank line.
+If `--prompt-file` is provided, the CLI loads that file as the first mission prompt, then continues into interactive mode if stdin is a terminal.
 
 ## Flags
 
 - `--preferred-model <model>`
 - `--allowed-models model-a,model-b`
 - `--output-schema /absolute/path/to/schema.json`
+- `--prompt-file /absolute/path/to/prompt.md`
 - `--api-url http://127.0.0.1:8000`
 - `--start-server`
 - `--server-ready-timeout-seconds <seconds>`

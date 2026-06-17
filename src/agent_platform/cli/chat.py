@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Callable
 
 from agent_platform.cli.formatters import format_final_stream_response, format_stream_event
@@ -12,12 +14,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     defaults = build_defaults(args)
     session = ChatSession(defaults)
+    prompt_file = load_prompt_file(args.prompt_file) if args.prompt_file else None
     try:
         print("Agent Platform terminal chat")
         print("Commands: /help, /config, /exit")
         print("Enter a blank line to submit a multiline mission.")
+        if args.prompt_file:
+            print(f"Loaded prompt file: {args.prompt_file}")
+        prompt_queue = [prompt_file] if prompt_file else []
         while True:
-            prompt = read_prompt_block()
+            if prompt_queue:
+                prompt = prompt_queue.pop(0)
+            else:
+                prompt = read_prompt_block()
             if prompt is None:
                 return 0
             if prompt in {"/exit", "/quit"}:
@@ -50,6 +59,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
             response = MissionRunResponse.model_validate(response_data)
             print(format_final_stream_response(response, run_state["tool_names"]))
+            if args.prompt_file and not sys.stdin.isatty():
+                return 0
     finally:
         session.close()
     return 0
@@ -64,6 +75,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--preferred-model")
     parser.add_argument("--allowed-models")
     parser.add_argument("--output-schema")
+    parser.add_argument("--prompt-file")
     parser.add_argument("--web-enabled", dest="web_enabled", action="store_true", default=True)
     parser.add_argument("--no-web", dest="web_enabled", action="store_false")
     parser.add_argument("--db-mutation-enabled", dest="db_mutation_enabled", action="store_true", default=True)
@@ -92,6 +104,12 @@ def parse_allowed_models(value: str | None) -> list[str] | None:
     if not value:
         return None
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def load_prompt_file(path: str | None) -> str | None:
+    if not path:
+        return None
+    return Path(path).read_text(encoding="utf-8")
 
 
 def read_prompt_block(input_fn: Callable[[str], str] = input) -> str | None:

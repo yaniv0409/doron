@@ -106,12 +106,12 @@ class AgentFactory:
 
         if not runtime.services.settings.debug.disable_browser_tools:
             @agent.tool
-            async def browser_open(ctx: RunContext[MissionRuntime], url: str) -> ToolResult:
+            async def browser_open(ctx: RunContext[MissionRuntime], urls: list[str]) -> ToolResult:
                 if not ctx.deps.context.mission_request.web_enabled:
                     raise ConfigurationError("web access is disabled for this mission")
-                arguments = {"url": url}
+                arguments = {"urls": urls}
                 self._emit_tool_started(ctx.deps, "browser_open", arguments)
-                result = await open_url(ctx.deps, url)
+                result = await open_url(ctx.deps, urls)
                 self._emit_tool_completed(ctx.deps, "browser_open", arguments, result)
                 return result
             tool_names.append("browser_open")

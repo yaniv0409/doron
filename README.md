@@ -14,6 +14,8 @@ Web extraction behavior:
 - browser context configured to look like a normal desktop session
 - cleaned readable page text without HTML tags
 - structured extracted links from the rendered page
+- batch `browser_open(urls)` fetches multiple URLs in parallel with a configurable worker pool
+- batch results preserve input order and may contain partial failures
 
 The codebase is organized for extension by both humans and coding agents:
 
@@ -89,12 +91,14 @@ python -m agent_platform.cli.chat --db-path /absolute/path/to/database.kuzu --ap
 If you want the terminal to start a local API server automatically, add `--start-server`.
 If the database path does not exist yet, the platform will initialize a new Kuzu database there on first use.
 Prompts are multiline by default. Type lines freely and submit with a blank line.
+If you pass `--prompt-file`, the CLI loads that file as the first mission prompt before it drops into interactive mode.
 
 Optional flags:
 
 - `--preferred-model <model>`
 - `--allowed-models model-a,model-b`
 - `--output-schema /absolute/path/to/schema.json`
+- `--prompt-file /absolute/path/to/prompt.md`
 - `--api-url http://127.0.0.1:8000`
 - `--start-server`
 - `--no-web`

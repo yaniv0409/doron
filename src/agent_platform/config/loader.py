@@ -74,6 +74,16 @@ def apply_environment(settings: AppSettings, environ: dict[str, str] | os._Envir
     )
     _set_if_present(
         environ,
+        "AGENT_PLATFORM_BROWSER_MAX_URLS_PER_BATCH",
+        lambda value: _setattr(settings.browser, "max_urls_per_batch", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_BROWSER_FETCH_WORKERS",
+        lambda value: _setattr(settings.browser, "web_fetch_workers", int(value)),
+    )
+    _set_if_present(
+        environ,
         "AGENT_PLATFORM_BROWSER_CONTENT_TEXT_MAX_CHARS",
         lambda value: _setattr(settings.browser, "content_text_max_chars", int(value)),
     )

@@ -93,6 +93,29 @@ class WebArtifact(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
 
 
+class WebFetchResult(BaseModel):
+    requested_url: str
+    url: str | None = None
+    ok: bool = True
+    title: str | None = None
+    text: str | None = None
+    links: list[PageLink] = Field(default_factory=list)
+    load_state: str | None = None
+    browser_stage: str | None = None
+    error_type: str | None = None
+    error_message: str | None = None
+    retry_hint: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class WebFetchBatchResult(BaseModel):
+    requested_urls: list[str]
+    results: list[WebFetchResult]
+    successful_count: int
+    failed_count: int
+    max_workers: int
+
+
 class DocumentationLookupRecord(BaseModel):
     query: str
     source_id: str

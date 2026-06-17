@@ -1,6 +1,6 @@
 from argparse import Namespace
 
-from agent_platform.cli.chat import build_defaults, parse_allowed_models, read_prompt_block
+from agent_platform.cli.chat import build_defaults, load_prompt_file, parse_allowed_models, parse_args, read_prompt_block
 from agent_platform.cli.formatters import format_final_stream_response, format_stream_event
 from agent_platform.contracts.api import MissionStreamEvent
 from agent_platform.contracts.api import MissionRunResponse
@@ -33,6 +33,19 @@ def test_build_defaults_uses_namespace_values() -> None:
     assert defaults.preferred_model == "openai/gpt-5.2"
     assert defaults.allowed_models == ["openai/gpt-4.1-mini", "openai/gpt-5.2"]
     assert defaults.web_enabled is False
+
+
+def test_parse_args_supports_prompt_file() -> None:
+    args = parse_args(["--db-path", "/tmp/demo.kuzu", "--prompt-file", "/tmp/prompt.md"])
+
+    assert args.prompt_file == "/tmp/prompt.md"
+
+
+def test_load_prompt_file_reads_verbatim(tmp_path) -> None:
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("First line\n\nSecond line\n", encoding="utf-8")
+
+    assert load_prompt_file(str(prompt_file)) == "First line\n\nSecond line\n"
 
 
 def test_format_stream_event_and_final_response() -> None:

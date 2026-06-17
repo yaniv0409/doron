@@ -16,7 +16,7 @@ Requirements:
 
 ## Browser tools
 
-- `browser_open(url)`
+- `browser_open(urls)`
 - `browser_text()`
 
 Requirements:
@@ -27,6 +27,8 @@ Requirements:
 - wait for `domcontentloaded` and then `networkidle`
 - extract readable main-content text with no HTML tags in the final text payload
 - return structured links with `text`, `href`, and optional `title`
+- fetch multiple URLs in parallel through a configurable thread pool
+- preserve input order and return partial success when some URLs fail
 - log visited URLs and extraction summaries
 - write browser-stage progress events so stalls can be attributed to navigation, `networkidle`, or extraction
 - prefer structured tool results so recoverable browser issues can be reasoned about by the agent

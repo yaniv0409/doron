@@ -39,6 +39,8 @@ class BrowserSettings(BaseModel):
     default_timeout_ms: int = 20_000
     navigation_timeout_ms: int = 15_000
     network_idle_timeout_ms: int = 15_000
+    max_urls_per_batch: int = 5
+    web_fetch_workers: int = 4
     content_text_max_chars: int = 10_000
     max_links_per_page: int = 200
     extract_main_content_only: bool = True
@@ -70,7 +72,7 @@ class CompressionSettings(BaseModel):
 
 
 class RuntimeSettings(BaseModel):
-    agent_run_timeout_seconds: int = 180
+    agent_run_timeout_seconds: int = 600
 
 
 class DebugSettings(BaseModel):
