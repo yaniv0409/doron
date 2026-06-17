@@ -6,7 +6,6 @@ from typing import Any
 
 from agent_platform.agent.prompts import build_system_prompt
 from agent_platform.application.live_events import emit_runtime_event
-from agent_platform.application.output_schema import build_output_type
 from agent_platform.application.runtime_builder import MissionRuntime
 from agent_platform.domain.exceptions import ConfigurationError, ModelSwitchRequested
 from agent_platform.domain.models import ToolResult
@@ -51,9 +50,6 @@ class AgentFactory:
             "system_prompt": build_system_prompt(runtime.context),
             "deps_type": MissionRuntime,
         }
-        output_type = build_output_type(runtime.context.mission_request.output_schema)
-        if output_type is not None:
-            agent_kwargs["output_type"] = output_type
         agent = Agent(model, **agent_kwargs)
         tool_names = self._register_tools(agent, runtime)
         return AgentSession(runtime=runtime, agent=agent, tool_names=tool_names)

@@ -39,7 +39,7 @@ class BrowserSettings(BaseModel):
     default_timeout_ms: int = 20_000
     navigation_timeout_ms: int = 15_000
     network_idle_timeout_ms: int = 15_000
-    web_tool_call_budget: int = 20
+    web_tool_call_budget: int = 2
     max_urls_per_batch: int = 5
     web_fetch_workers: int = 4
     content_text_max_chars: int = 10_000
