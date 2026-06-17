@@ -87,6 +87,7 @@ python -m agent_platform.cli.chat --db-path /absolute/path/to/database.kuzu --ap
 
 If you want the terminal to start a local API server automatically, add `--start-server`.
 If the database path does not exist yet, the platform will initialize a new Kuzu database there on first use.
+Prompts are multiline by default. Type lines freely and submit with a blank line.
 
 Optional flags:
 
@@ -104,6 +105,8 @@ After each prompt, the terminal prints:
 - the final model
 - the trace id
 - a compact ordered list of tools used
+
+If `/help`, `/config`, `/exit`, or `/quit` is entered as the first line, it is treated as a command. Once a multiline prompt is in progress, slash-prefixed lines are treated as normal prompt text.
 
 Tool usage is streamed live from the API as tool events, traced canonically in `traces/<trace_id>/trace.json`, and also written to rolling logs under `logs/`.
 Live execution progress is written to `traces/<trace_id>/progress.json`, including browser-stage events such as navigation start, `domcontentloaded`, `networkidle`, fallback, timeout, and extraction.

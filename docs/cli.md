@@ -11,6 +11,7 @@ python -m agent_platform.cli.chat --db-path /absolute/path/to/database.kuzu --ap
 If `--db-path` is omitted, the CLI prompts for it at startup.
 If the path does not exist, the runtime creates a new Kuzu database at that location.
 The terminal talks to the API over HTTP and uses the streamed mission mode by default.
+Prompts are multiline by default: type lines freely and submit the mission with a blank line.
 
 ## Flags
 
@@ -45,6 +46,8 @@ While the mission is running, it prints live stream updates for:
 - mission progress
 - tool starts and completions
 - the final result event
+
+If you enter `/help`, `/config`, `/exit`, or `/quit` as the first line of a prompt, the CLI treats it as a command. If you already started a multiline prompt, slash-prefixed lines are treated as prompt text.
 
 Example summary:
 

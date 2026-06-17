@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+from typing import Callable
 
 from agent_platform.cli.formatters import format_final_stream_response, format_stream_event
 from agent_platform.cli.session import ChatDefaults, ChatSession, load_output_schema
@@ -14,10 +15,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         print("Agent Platform terminal chat")
         print("Commands: /help, /config, /exit")
+        print("Enter a blank line to submit a multiline mission.")
         while True:
-            prompt = input("You> ").strip()
-            if not prompt:
-                continue
+            prompt = read_prompt_block()
+            if prompt is None:
+                return 0
             if prompt in {"/exit", "/quit"}:
                 return 0
             if prompt == "/help":
@@ -90,6 +92,25 @@ def parse_allowed_models(value: str | None) -> list[str] | None:
     if not value:
         return None
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def read_prompt_block(input_fn: Callable[[str], str] = input) -> str | None:
+    lines: list[str] = []
+    while True:
+        prompt = "You> " if not lines else "...> "
+        try:
+            line = input_fn(prompt)
+        except EOFError:
+            if lines:
+                return "\n".join(lines)
+            return None
+        if not lines and line.strip() in {"/help", "/config", "/exit", "/quit"}:
+            return line.strip()
+        if line == "":
+            if lines:
+                return "\n".join(lines)
+            continue
+        lines.append(line)
 
 
 if __name__ == "__main__":

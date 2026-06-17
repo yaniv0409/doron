@@ -1,6 +1,6 @@
 from argparse import Namespace
 
-from agent_platform.cli.chat import build_defaults, parse_allowed_models
+from agent_platform.cli.chat import build_defaults, parse_allowed_models, read_prompt_block
 from agent_platform.cli.formatters import format_final_stream_response, format_response, format_stream_event, format_tool_summary
 from agent_platform.contracts.api import MissionStreamEvent
 from agent_platform.contracts.api import MissionRunResponse
@@ -105,3 +105,45 @@ def test_format_stream_event_and_final_response() -> None:
     assert "Tool ok: graph_schema" in format_stream_event(event)
     final_rendered = format_final_stream_response(response, ["graph_schema"])
     assert "Tools: graph_schema" in final_rendered
+
+
+def test_read_prompt_block_collects_multiline_prompt() -> None:
+    lines = iter(["First line", "Second line", ""])
+
+    def fake_input(_: str) -> str:
+        return next(lines)
+
+    assert read_prompt_block(fake_input) == "First line\nSecond line"
+
+
+def test_read_prompt_block_treats_commands_only_when_buffer_empty() -> None:
+    command_lines = iter(["/help"])
+
+    def command_input(_: str) -> str:
+        return next(command_lines)
+
+    assert read_prompt_block(command_input) == "/help"
+
+    prompt_lines = iter(["First line", "/help", ""])
+
+    def prompt_input(_: str) -> str:
+        return next(prompt_lines)
+
+    assert read_prompt_block(prompt_input) == "First line\n/help"
+
+
+def test_read_prompt_block_eof_behaviour() -> None:
+    def eof_input(_: str) -> str:
+        raise EOFError
+
+    assert read_prompt_block(eof_input) is None
+
+    lines = iter(["First line"])
+
+    def eof_after_buffer(_: str) -> str:
+        try:
+            return next(lines)
+        except StopIteration as exc:
+            raise EOFError from exc
+
+    assert read_prompt_block(eof_after_buffer) == "First line"
