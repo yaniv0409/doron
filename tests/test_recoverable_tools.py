@@ -76,3 +76,4 @@ def test_system_prompt_instructs_agent_to_continue_after_tool_failure() -> None:
 
     assert "ok=false" in prompt
     assert "do not give up" in prompt
+    assert "compress_context" in prompt

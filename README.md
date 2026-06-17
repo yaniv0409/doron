@@ -7,6 +7,12 @@ Generic agent platform scaffold built around:
 - Playwright for web automation
 - OpenRouter for model and embedding access
 
+Web extraction behavior:
+
+- Playwright navigation with `domcontentloaded` plus `networkidle` fallback
+- cleaned readable page text without HTML tags
+- structured extracted links from the rendered page
+
 The codebase is organized for extension by both humans and coding agents:
 
 - short functions

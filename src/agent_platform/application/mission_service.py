@@ -9,7 +9,7 @@ from agent_platform.application.result_validation import ResultValidator
 from agent_platform.application.runtime_builder import MissionRuntime, RuntimeBuilder
 from agent_platform.config.settings import AppSettings
 from agent_platform.domain.enums import LogCategory, MissionStatus, ResultFormat
-from agent_platform.domain.exceptions import AgentPlatformError, ModelSwitchRequested, OutputValidationError
+from agent_platform.domain.exceptions import AgentPlatformError, ContextRefreshRequested, ModelSwitchRequested, OutputValidationError
 from agent_platform.domain.models import ExecutionTrace, MissionError, MissionRequest, MissionResult, utc_now
 from agent_platform.infrastructure.logging import get_logger
 
@@ -38,7 +38,18 @@ class MissionService:
         prompt = request.prompt
         try:
             while True:
-                raw_output = await self._run_once(runtime, prompt)
+                try:
+                    raw_output = await self._run_once(runtime, prompt)
+                except ContextRefreshRequested as exc:
+                    runtime.context.pending_context_refresh_reason = None
+                    prompt = build_handoff_prompt(
+                        runtime.context.build_transfer_packet(),
+                        request,
+                    )
+                    runtime.context.reasoning_notes.append(
+                        f"Context was refreshed and compressed: {exc.reason}",
+                    )
+                    continue
                 if runtime.context.pending_model_switch:
                     next_model = self._promote_model(runtime, runtime.context.pending_model_switch)
                     if next_model is None:
@@ -143,6 +154,7 @@ class MissionService:
             db_mutations=runtime.context.db_mutations,
             docs_lookups=runtime.context.docs_lookups,
             web_artifacts=runtime.context.web_artifacts,
+            compression_events=runtime.context.compression_events,
             result=result.result if result else None,
             error=error,
             started_at=runtime.context.started_at,
@@ -184,6 +196,8 @@ class MissionService:
             self._db_logger.info(item.model_dump_json(), extra=extra)
         for item in runtime.context.docs_lookups:
             self._docs_logger.info(item.model_dump_json(), extra=extra)
+        for item in runtime.context.compression_events:
+            self._reasoning_logger.info(item.model_dump_json(), extra=extra)
         for item in runtime.context.web_findings[-5:]:
             self._web_logger.info(item, extra=extra)
         for item in runtime.context.reasoning_notes[-10:]:

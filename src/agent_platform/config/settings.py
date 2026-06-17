@@ -37,10 +37,24 @@ class TraceSettings(BaseModel):
 class BrowserSettings(BaseModel):
     headless: bool = True
     default_timeout_ms: int = 20_000
+    network_idle_timeout_ms: int = 5_000
+    content_text_max_chars: int = 10_000
+    max_links_per_page: int = 200
+    extract_main_content_only: bool = True
 
 
 class DocumentationSettings(BaseModel):
     kuzu_reference_path: Path = Path("docs/kuzu-notes.md")
+
+
+class CompressionSettings(BaseModel):
+    enabled: bool = True
+    threshold_ratio: float = 0.6
+    fallback_budget_chars: int = 12_000
+    min_growth_chars: int = 3_000
+    max_notes: int = 12
+    max_findings: int = 12
+    max_tool_summaries: int = 20
 
 
 class AppSettings(BaseModel):
@@ -49,6 +63,7 @@ class AppSettings(BaseModel):
     traces: TraceSettings = Field(default_factory=TraceSettings)
     browser: BrowserSettings = Field(default_factory=BrowserSettings)
     docs: DocumentationSettings = Field(default_factory=DocumentationSettings)
+    compression: CompressionSettings = Field(default_factory=CompressionSettings)
     models: list[ModelSettings] = Field(
         default_factory=lambda: [
             ModelSettings(name="openai/gpt-4.1-mini", rank=10, is_default=True),

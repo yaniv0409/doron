@@ -27,3 +27,5 @@ The handoff packet includes:
 - database findings
 - web findings
 - tool summaries
+
+When context compression runs, the original mission prompt remains unchanged and only the replaceable working-memory portion is distilled.

@@ -30,6 +30,14 @@ class ModelSwitchRequested(AgentPlatformError):
         self.target_model = target_model
 
 
+class ContextRefreshRequested(AgentPlatformError):
+    """Signal used to restart execution with compressed context."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"context refresh requested: {reason}")
+        self.reason = reason
+
+
 class OutputValidationError(AgentPlatformError):
     """Structured output failed validation."""
 

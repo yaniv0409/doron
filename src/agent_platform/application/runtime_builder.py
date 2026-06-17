@@ -4,12 +4,13 @@ import uuid
 from dataclasses import dataclass
 
 from agent_platform.config.settings import AppSettings
+from agent_platform.application.context_compression import ContextCompressor
 from agent_platform.domain.models import MissionRequest, RuntimeContext, utc_now
 from agent_platform.infrastructure.browser import PlaywrightBrowserEngine
 from agent_platform.infrastructure.docs_loader import DocumentationRepository
 from agent_platform.infrastructure.kuzu_client import KuzuGateway
 from agent_platform.infrastructure.model_catalog import ModelCatalog
-from agent_platform.infrastructure.openrouter_client import OpenRouterEmbeddingClient
+from agent_platform.infrastructure.openrouter_client import OpenRouterChatClient, OpenRouterEmbeddingClient
 from agent_platform.infrastructure.trace_store import TraceStore
 
 
@@ -20,6 +21,8 @@ class RuntimeServices:
     trace_store: TraceStore
     docs_repository: DocumentationRepository
     embedding_client: OpenRouterEmbeddingClient
+    chat_client: OpenRouterChatClient
+    context_compressor: ContextCompressor
 
 
 @dataclass(slots=True)
@@ -38,6 +41,8 @@ class RuntimeBuilder:
             trace_store=TraceStore(settings.traces),
             docs_repository=DocumentationRepository(settings.docs),
             embedding_client=OpenRouterEmbeddingClient(settings.openrouter),
+            chat_client=OpenRouterChatClient(settings.openrouter),
+            context_compressor=ContextCompressor(settings.compression),
         )
 
     def build(self, request: MissionRequest) -> MissionRuntime:

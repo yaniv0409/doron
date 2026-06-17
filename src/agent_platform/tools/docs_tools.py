@@ -3,6 +3,7 @@ from __future__ import annotations
 from agent_platform.application.runtime_builder import MissionRuntime
 from agent_platform.domain.exceptions import DocumentationError
 from agent_platform.domain.models import DocumentationLookupRecord, ToolResult
+from agent_platform.tools.compression_tools import maybe_auto_compress
 from agent_platform.tools.result_utils import build_tool_call, error_result, success_result
 
 
@@ -44,6 +45,7 @@ async def lookup_kuzu_docs(runtime: MissionRuntime, query: str) -> ToolResult:
         )
     )
     runtime.context.tool_summaries.append(f"lookup_kuzu_docs: {query}")
+    await maybe_auto_compress(runtime, "documentation lookup expanded working memory")
     return success_result(
         "lookup_kuzu_docs",
         f"[{section.title}]\n{excerpt}",

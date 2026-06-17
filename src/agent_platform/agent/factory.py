@@ -7,6 +7,7 @@ from agent_platform.agent.prompts import build_system_prompt
 from agent_platform.application.runtime_builder import MissionRuntime
 from agent_platform.domain.exceptions import ConfigurationError
 from agent_platform.domain.models import ToolResult
+from agent_platform.tools.compression_tools import compress_context
 from agent_platform.tools.db_tools import inspect_schema, read_graph, write_graph
 from agent_platform.tools.docs_tools import lookup_kuzu_docs
 from agent_platform.tools.model_tools import request_model_switch
@@ -97,6 +98,13 @@ class AgentFactory:
         ) -> str:
             return await request_model_switch(ctx.deps, target_model, reason)
 
+        @agent.tool
+        async def clean_context(
+            ctx: RunContext[MissionRuntime],
+            reason: str,
+        ) -> ToolResult:
+            return await compress_context(ctx.deps, reason)
+
         runtime.context.tool_summaries.append(
-            "registered tools: graph_read, graph_write, graph_schema, kuzu_reference, browser_open, browser_text, switch_model",
+            "registered tools: graph_read, graph_write, graph_schema, kuzu_reference, browser_open, browser_text, switch_model, clean_context",
         )

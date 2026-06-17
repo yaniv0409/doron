@@ -64,8 +64,63 @@ def apply_environment(settings: AppSettings, environ: dict[str, str] | os._Envir
     )
     _set_if_present(
         environ,
+        "AGENT_PLATFORM_BROWSER_NETWORK_IDLE_TIMEOUT_MS",
+        lambda value: _setattr(settings.browser, "network_idle_timeout_ms", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_BROWSER_CONTENT_TEXT_MAX_CHARS",
+        lambda value: _setattr(settings.browser, "content_text_max_chars", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_BROWSER_MAX_LINKS_PER_PAGE",
+        lambda value: _setattr(settings.browser, "max_links_per_page", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_BROWSER_EXTRACT_MAIN_CONTENT_ONLY",
+        lambda value: _setattr(settings.browser, "extract_main_content_only", _to_bool(value)),
+    )
+    _set_if_present(
+        environ,
         "AGENT_PLATFORM_KUZU_REFERENCE_PATH",
         lambda value: _setattr(settings.docs, "kuzu_reference_path", Path(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_COMPRESSION_ENABLED",
+        lambda value: _setattr(settings.compression, "enabled", _to_bool(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_COMPRESSION_THRESHOLD_RATIO",
+        lambda value: _setattr(settings.compression, "threshold_ratio", float(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_COMPRESSION_FALLBACK_BUDGET_CHARS",
+        lambda value: _setattr(settings.compression, "fallback_budget_chars", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_COMPRESSION_MIN_GROWTH_CHARS",
+        lambda value: _setattr(settings.compression, "min_growth_chars", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_COMPRESSION_MAX_NOTES",
+        lambda value: _setattr(settings.compression, "max_notes", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_COMPRESSION_MAX_FINDINGS",
+        lambda value: _setattr(settings.compression, "max_findings", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_COMPRESSION_MAX_TOOL_SUMMARIES",
+        lambda value: _setattr(settings.compression, "max_tool_summaries", int(value)),
     )
     _set_if_present(
         environ,

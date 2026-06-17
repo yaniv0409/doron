@@ -60,3 +60,6 @@ class ModelCatalog:
         if not stronger:
             return None
         return stronger[0]
+
+    def strongest_allowed(self, allowed: list[ModelDescriptor]) -> ModelDescriptor:
+        return max(allowed, key=lambda item: item.rank)

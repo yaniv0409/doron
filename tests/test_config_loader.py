@@ -30,6 +30,8 @@ def test_apply_environment_loads_model_file_and_overrides_settings(tmp_path: Pat
         "AGENT_PLATFORM_MODELS_FILE": str(models_path),
         "AGENT_PLATFORM_BROWSER_HEADLESS": "false",
         "AGENT_PLATFORM_BROWSER_TIMEOUT_MS": "15000",
+        "AGENT_PLATFORM_BROWSER_NETWORK_IDLE_TIMEOUT_MS": "4000",
+        "AGENT_PLATFORM_BROWSER_MAX_LINKS_PER_PAGE": "50",
         "AGENT_PLATFORM_LOG_DIR": "var/logs",
     }
 
@@ -40,6 +42,8 @@ def test_apply_environment_loads_model_file_and_overrides_settings(tmp_path: Pat
     assert settings.openrouter.embedding_model == "openai/text-embedding-3-large"
     assert settings.browser.headless is False
     assert settings.browser.default_timeout_ms == 15000
+    assert settings.browser.network_idle_timeout_ms == 4000
+    assert settings.browser.max_links_per_page == 50
     assert settings.logging.directory == Path("var/logs")
     assert [item.name for item in settings.models] == [
         "openai/gpt-4.1-mini",

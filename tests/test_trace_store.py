@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from agent_platform.config.settings import TraceSettings
-from agent_platform.domain.models import ExecutionTrace, MissionRequest, ToolCallRecord, WebArtifact, utc_now
+from agent_platform.domain.models import CompressionEvent, ExecutionTrace, MissionRequest, PageLink, ToolCallRecord, WebArtifact, utc_now
 from agent_platform.infrastructure.trace_store import TraceStore
 
 
@@ -31,7 +31,23 @@ def test_trace_store_round_trip_preserves_tool_calls_and_web_artifacts(tmp_path:
         db_mutations=[],
         docs_lookups=[],
         web_artifacts=[
-            WebArtifact(url="https://example.com", title="Example", summary="demo"),
+            WebArtifact(
+                url="https://example.com",
+                title="Example",
+                summary="demo",
+                load_state="networkidle",
+                links_count=2,
+            ),
+        ],
+        compression_events=[
+            CompressionEvent(
+                trigger="manual",
+                summarizer_model="openai/gpt-5.2",
+                reason="reduce context",
+                size_before=20000,
+                size_after=4000,
+                preview="distilled note",
+            )
         ],
         result={"ok": True},
         started_at=utc_now(),
@@ -43,6 +59,9 @@ def test_trace_store_round_trip_preserves_tool_calls_and_web_artifacts(tmp_path:
 
     assert [item.name for item in loaded.tool_calls] == ["open_url", "switch_model"]
     assert loaded.web_artifacts[0].url == "https://example.com"
+    assert loaded.web_artifacts[0].load_state == "networkidle"
+    assert loaded.web_artifacts[0].links_count == 2
+    assert loaded.compression_events[0].summarizer_model == "openai/gpt-5.2"
 
 
 def test_checkpoint_copies_file_database_path(tmp_path: Path) -> None:

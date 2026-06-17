@@ -5,6 +5,7 @@ from typing import Any
 from agent_platform.application.runtime_builder import MissionRuntime
 from agent_platform.domain.exceptions import DatabaseError
 from agent_platform.domain.models import DbMutationRecord, ToolResult
+from agent_platform.tools.compression_tools import maybe_auto_compress
 from agent_platform.tools.result_utils import build_tool_call, error_result, success_result
 
 
@@ -44,6 +45,7 @@ async def read_graph(
     )
     runtime.context.db_findings.append(f"Read query returned {len(rows)} row(s)")
     runtime.context.tool_summaries.append(f"read_graph: {query[:160]}")
+    await maybe_auto_compress(runtime, "database read expanded working memory")
     return success_result("read_graph", rows, f"returned {len(rows)} row(s)")
 
 
@@ -95,6 +97,7 @@ async def write_graph(
         )
     )
     runtime.context.tool_summaries.append(f"write_graph: {query[:160]}")
+    await maybe_auto_compress(runtime, "database write expanded working memory")
     return success_result("write_graph", rows, summary)
 
 
@@ -130,6 +133,7 @@ async def inspect_schema(runtime: MissionRuntime) -> ToolResult:
     )
     runtime.context.db_findings.append(schema[:500])
     runtime.context.tool_summaries.append("inspect_schema")
+    await maybe_auto_compress(runtime, "schema inspection expanded working memory")
     return success_result("inspect_schema", schema, "schema returned")
 
 

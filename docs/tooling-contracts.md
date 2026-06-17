@@ -22,6 +22,9 @@ Requirements:
 Requirements:
 
 - mission-scoped browser lifecycle
+- wait for `domcontentloaded` and then attempt `networkidle` with a bounded fallback
+- extract readable main-content text with no HTML tags in the final text payload
+- return structured links with `text`, `href`, and optional `title`
 - log visited URLs and extraction summaries
 - prefer structured tool results so recoverable browser issues can be reasoned about by the agent
 

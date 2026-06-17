@@ -12,6 +12,8 @@ def build_system_prompt(context: RuntimeContext) -> str:
         "Tool calls may return structured results with fields: ok, tool, error_type, error_message, retry_hint, data.",
         "If a tool returns ok=false, do not give up. Read the error, decide the next step, and continue if the mission is still solvable.",
         "For database lookup failures, prefer: inspect schema, reformulate the query, consult Kuzu reference, then use web or model knowledge if needed.",
+        "A compress_context tool exists. Use it when working memory has become large or repetitive.",
+        "The original mission prompt always remains unchanged. Compressed working memory may replace older notes and is authoritative after compression.",
         "If a stronger model is necessary, call the model-switch tool with a short reason.",
         "If an output schema exists, return only valid JSON matching the schema.",
         "If no output schema exists, return concise plain text.",
@@ -30,6 +32,8 @@ def build_handoff_prompt(packet: ContextTransferPacket, request: MissionRequest)
         f"Mission prompt: {request.prompt}",
         "Carry forward prior findings and finish the task.",
     ]
+    if packet.notice:
+        lines.append(f"Context notice: {packet.notice}")
     if packet.notes:
         lines.append("Notes:")
         lines.extend(f"- {item}" for item in packet.notes)
