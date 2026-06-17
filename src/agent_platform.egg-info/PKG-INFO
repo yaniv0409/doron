@@ -6,6 +6,7 @@ Author: Yaniv
 License: MIT
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown
+Requires-Dist: beautifulsoup4>=4.12.3
 Requires-Dist: fastapi>=0.115.0
 Requires-Dist: httpx>=0.27.0
 Requires-Dist: jsonschema>=4.23.0
@@ -29,6 +30,17 @@ Generic agent platform scaffold built around:
 - Playwright for web automation
 - OpenRouter for model and embedding access
 
+Web extraction behavior:
+
+- Playwright navigation with `domcontentloaded` and `networkidle`
+- dedicated 15-second browser navigation timeout by default, configurable through environment
+- browser context configured to look like a normal desktop session
+- cleaned readable page text without HTML tags
+- structured extracted links from the rendered page
+- batch `browser_open(urls)` fetches multiple URLs in parallel with a configurable worker pool
+- batch results preserve input order and may contain partial failures
+- browser tools are capped at 20 calls per mission by default, and every tool call carries a reason
+
 The codebase is organized for extension by both humans and coding agents:
 
 - short functions
@@ -36,6 +48,7 @@ The codebase is organized for extension by both humans and coding agents:
 - rolling audit logs
 - mission traces persisted to disk
 - documentation in `docs/`
+- this is an evolving project, not a production compatibility target; prefer deleting dead code over preserving shims
 
 ## Quick start
 
@@ -78,6 +91,7 @@ Send:
 - `db_path`
 - optional `output_schema`
 - optional model controls
+- optional `stream=true` to receive SSE events instead of blocking JSON
 
 Receive:
 
@@ -86,4 +100,46 @@ Receive:
 - final model
 - trace id
 
+Stream mode emits live mission progress, tool events, and the final result over SSE from the same endpoint.
+
+`POST /db/contents`
+
+Read-only database snapshot endpoint for end apps. It discovers whatever tables exist in a Kuzu database file given in `db_path` and returns a generic `tables` snapshot with optional schema, counts, connections, and bounded sample rows.
+
 See `docs/` for architecture and implementation details.
+
+## Terminal chat
+
+Run a terminal chat that talks to the API:
+
+```bash
+python -m agent_platform.cli.chat --db-path /absolute/path/to/database.kuzu --api-url http://127.0.0.1:8000
+```
+
+If you want the terminal to start a local API server automatically, add `--start-server`.
+If the database path does not exist yet, the platform will initialize a new Kuzu database there on first use.
+Prompts are multiline by default. Type lines freely and submit with a blank line.
+If you pass `--prompt-file`, the CLI loads that file as the first mission prompt before it drops into interactive mode.
+
+Optional flags:
+
+- `--preferred-model <model>`
+- `--allowed-models model-a,model-b`
+- `--output-schema /absolute/path/to/schema.json`
+- `--prompt-file /absolute/path/to/prompt.md`
+- `--api-url http://127.0.0.1:8000`
+- `--start-server`
+- `--no-web`
+- `--no-db-mutation`
+
+After each prompt, the terminal prints:
+
+- the mission result
+- the final model
+- the trace id
+- a compact ordered list of tools used
+
+If `/help`, `/config`, `/exit`, or `/quit` is entered as the first line, it is treated as a command. Once a multiline prompt is in progress, slash-prefixed lines are treated as normal prompt text.
+
+Tool usage is streamed live from the API as tool events, traced canonically in `traces/<trace_id>/trace.json`, and also written to rolling logs under `logs/`.
+Live execution progress is written to `traces/<trace_id>/progress.json`, including browser-stage events such as navigation start, `domcontentloaded`, `networkidle`, timeout, and extraction.

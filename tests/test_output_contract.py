@@ -5,8 +5,10 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
+from agent_platform.agent import factory as factory_module
+from agent_platform.agent.factory import AgentFactory
 from agent_platform.agent.prompts import build_handoff_prompt, build_output_repair_prompt, build_system_prompt
 from agent_platform.application.mission_service import MissionService
 from agent_platform.application.output_schema import build_output_type
@@ -26,7 +28,15 @@ def _build_runtime(request: MissionRequest) -> RuntimeContext:
     )
 
 
-def test_build_output_type_creates_dynamic_model() -> None:
+def _build_runtime_wrapper(request: MissionRequest, settings: AppSettings) -> SimpleNamespace:
+    context = _build_runtime(request)
+    return SimpleNamespace(
+        context=context,
+        services=SimpleNamespace(settings=settings),
+    )
+
+
+def test_build_output_type_returns_structured_dict() -> None:
     schema = {
         "type": "object",
         "properties": {
@@ -39,11 +49,71 @@ def test_build_output_type_creates_dynamic_model() -> None:
     output_type = build_output_type(schema)
 
     assert output_type is not None
-    result = output_type.model_validate({"answer": "ok", "score": 1.5})
-    assert result.model_dump(mode="json") == {"answer": "ok", "score": 1.5}
+    assert getattr(output_type, "__is_model_like__", False) is True
+    assert TypeAdapter(output_type).validate_python({"answer": "ok", "score": 1.5}) == {
+        "answer": "ok",
+        "score": 1.5,
+    }
 
     with pytest.raises(ValidationError):
-        output_type.model_validate({"answer": "ok", "score": 1.5, "extra": True})
+        TypeAdapter(output_type).validate_python(["not", "an", "object"])
+
+
+def test_agent_factory_passes_structured_output_type() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "answer": {"type": "string"},
+        },
+        "required": ["answer"],
+        "additionalProperties": False,
+    }
+    settings = AppSettings()
+    settings.openrouter.api_key = "test-key"
+    settings.openrouter.app_url = "https://example.test"
+    settings.openrouter.app_title = "wbi"
+    runtime = _build_runtime_wrapper(MissionRequest(prompt="Return the answer", db_path="/tmp/db.kuzu", output_schema=schema), settings)
+
+    captured: dict[str, object] = {}
+
+    class FakeProvider:
+        def __init__(self, *args, **kwargs) -> None:
+            self.args = args
+            self.kwargs = kwargs
+
+    class FakeModel:
+        def __init__(self, name, provider) -> None:
+            self.name = name
+            self.provider = provider
+
+    class FakeAgent:
+        def __init__(self, model, **kwargs) -> None:
+            captured["model"] = model
+            captured["kwargs"] = kwargs
+            self.model = model
+            self.kwargs = kwargs
+
+        def tool(self, fn):
+            return fn
+
+    original_agent = factory_module.Agent
+    original_model = factory_module.OpenRouterModel
+    original_provider = factory_module.OpenRouterProvider
+    try:
+        factory_module.Agent = FakeAgent
+        factory_module.OpenRouterModel = FakeModel
+        factory_module.OpenRouterProvider = FakeProvider
+        session = AgentFactory().create(runtime)
+    finally:
+        factory_module.Agent = original_agent
+        factory_module.OpenRouterModel = original_model
+        factory_module.OpenRouterProvider = original_provider
+
+    assert isinstance(session.runtime.context, RuntimeContext)
+    assert "output_type" in captured["kwargs"]
+    output_type = captured["kwargs"]["output_type"]
+    assert getattr(output_type, "__is_model_like__", False) is True
+    assert TypeAdapter(output_type).validate_python({"answer": "ok"}) == {"answer": "ok"}
 
 
 def test_prompt_builders_keep_structured_output_hint_after_refresh() -> None:
