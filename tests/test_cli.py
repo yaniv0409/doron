@@ -51,7 +51,12 @@ def test_load_prompt_file_reads_verbatim(tmp_path) -> None:
 def test_format_stream_event_and_final_response() -> None:
     event = MissionStreamEvent(
         event="tool.completed",
-        data={"name": "graph_schema", "ok": True, "result_summary": "schema returned"},
+        data={
+            "name": "graph_schema",
+            "ok": True,
+            "result_summary": "schema returned",
+            "created_at": "2026-06-17T12:34:56Z",
+        },
     )
     response = MissionRunResponse(
         status=MissionStatus.COMPLETED,
@@ -63,7 +68,7 @@ def test_format_stream_event_and_final_response() -> None:
         completed_at=utc_now().isoformat(),
     )
 
-    assert "Tool ok: graph_schema" in format_stream_event(event)
+    assert "[12:34:56] Tool ok: graph_schema" in format_stream_event(event)
     final_rendered = format_final_stream_response(response, ["graph_schema"])
     assert "Tools: graph_schema" in final_rendered
 

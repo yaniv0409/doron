@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
 
 from agent_platform.contracts.api import MissionStreamEvent
@@ -8,26 +9,27 @@ from agent_platform.contracts.api import MissionRunResponse
 
 
 def format_stream_event(event: MissionStreamEvent) -> str:
+    prefix = _format_event_prefix(event.data.get("created_at"))
     if event.event == "mission.started":
         trace_id = event.data.get("trace_id", "-")
-        return f"Mission started: {trace_id}"
+        return f"{prefix} Mission started: {trace_id}"
     if event.event == "mission.progress":
         phase = event.data.get("phase", "progress")
         message = event.data.get("message", "")
         if message:
-            return f"Progress: {phase} - {message}"
-        return f"Progress: {phase}"
+            return f"{prefix} Progress: {phase} - {message}"
+        return f"{prefix} Progress: {phase}"
     if event.event == "tool.started":
         name = event.data.get("name", "tool")
-        return f"Tool started: {name}"
+        return f"{prefix} Tool started: {name}"
     if event.event == "tool.completed":
         name = event.data.get("name", "tool")
         ok = event.data.get("ok", True)
         summary = event.data.get("result_summary") or "completed"
         status = "ok" if ok else "failed"
-        return f"Tool {status}: {name} - {summary}"
+        return f"{prefix} Tool {status}: {name} - {summary}"
     if event.event in {"mission.completed", "mission.failed"}:
-        return f"Mission {event.event.split('.')[-1]}"
+        return f"{prefix} Mission {event.event.split('.')[-1]}"
     return f"{event.event}: {json.dumps(event.data, ensure_ascii=False)}"
 
 
@@ -73,6 +75,16 @@ def format_config_summary(defaults: Any) -> str:
 
 def indent_block(text: str) -> str:
     return "\n".join(f"  {line}" for line in text.splitlines() or [""])
+
+
+def _format_event_prefix(created_at: Any) -> str:
+    if not isinstance(created_at, str) or not created_at:
+        return "[--:--:--]"
+    try:
+        stamp = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except ValueError:
+        return "[--:--:--]"
+    return f"[{stamp.strftime('%H:%M:%S')}]"
 
 
 def _format_result(result: Any) -> str:

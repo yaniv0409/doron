@@ -15,7 +15,7 @@ from agent_platform.contracts.api import MissionRunRequest, MissionStreamEvent
 from agent_platform.contracts.serialization import to_api_response
 from agent_platform.domain.enums import LogCategory
 from agent_platform.domain.exceptions import AgentPlatformError
-from agent_platform.domain.models import MissionRequest
+from agent_platform.domain.models import MissionRequest, utc_now
 from agent_platform.infrastructure.logging import configure_logging, get_logger
 
 
@@ -86,6 +86,7 @@ async def _stream_mission(app: FastAPI, mission_request: MissionRequest):
                     "data": {
                         "trace_id": getattr(getattr(app.state, "mission_service", None), "trace_id", None),
                         "error": {"code": type(exc).__name__, "message": str(exc)},
+                        "created_at": utc_now().isoformat(),
                     },
                 }
             )
@@ -95,7 +96,10 @@ async def _stream_mission(app: FastAPI, mission_request: MissionRequest):
             queue.put_nowait(
                 MissionStreamEvent(
                     event=event_name,
-                    data=response.model_dump(mode="json"),
+                    data={
+                        **response.model_dump(mode="json"),
+                        "created_at": utc_now().isoformat(),
+                    },
                 ).model_dump(mode="json")
             )
         finally:

@@ -50,4 +50,6 @@ def emit_runtime_event(
 def emit_stream_event(context: Any, event: str, data: dict[str, Any]) -> None:
     event_hook = getattr(context, "event_hook", None)
     if event_hook is not None:
-        event_hook({"event": event, "data": data})
+        payload = dict(data)
+        payload.setdefault("created_at", utc_now().isoformat())
+        event_hook({"event": event, "data": payload})

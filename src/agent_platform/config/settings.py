@@ -73,7 +73,7 @@ class CompressionSettings(BaseModel):
 
 
 class RuntimeSettings(BaseModel):
-    agent_run_timeout_seconds: int = 600
+    agent_run_timeout_seconds: int = 3600
 
 
 class DebugSettings(BaseModel):
