@@ -4,8 +4,12 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import pytest
+from pydantic import ValidationError
+
 from agent_platform.agent.prompts import build_handoff_prompt, build_output_repair_prompt, build_system_prompt
 from agent_platform.application.mission_service import MissionService
+from agent_platform.application.output_schema import build_output_type
 from agent_platform.config.settings import AppSettings
 from agent_platform.domain.enums import ResultFormat
 from agent_platform.domain.models import MissionRequest, ModelDescriptor, RuntimeContext, utc_now
@@ -22,7 +26,27 @@ def _build_runtime(request: MissionRequest) -> RuntimeContext:
     )
 
 
-def test_prompt_builders_keep_output_schema_visible_after_refresh() -> None:
+def test_build_output_type_creates_dynamic_model() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "answer": {"type": "string"},
+            "score": {"type": "number"},
+        },
+        "required": ["answer", "score"],
+        "additionalProperties": False,
+    }
+    output_type = build_output_type(schema)
+
+    assert output_type is not None
+    result = output_type.model_validate({"answer": "ok", "score": 1.5})
+    assert result.model_dump(mode="json") == {"answer": "ok", "score": 1.5}
+
+    with pytest.raises(ValidationError):
+        output_type.model_validate({"answer": "ok", "score": 1.5, "extra": True})
+
+
+def test_prompt_builders_keep_structured_output_hint_after_refresh() -> None:
     schema = {
         "type": "object",
         "properties": {"answer": {"type": "string"}},
@@ -33,8 +57,8 @@ def test_prompt_builders_keep_output_schema_visible_after_refresh() -> None:
     context = _build_runtime(request)
     schema_json = json.dumps(schema, ensure_ascii=False, indent=2, sort_keys=True)
 
-    assert schema_json in build_system_prompt(context)
-    assert schema_json in build_handoff_prompt(context)
+    assert "structured and will be validated" in build_system_prompt(context)
+    assert "structured and will be validated" in build_handoff_prompt(context)
     repair_prompt = build_output_repair_prompt(context, '{"wrong":"field"}', "answer is required")
     assert schema_json in repair_prompt
     assert "answer is required" in repair_prompt

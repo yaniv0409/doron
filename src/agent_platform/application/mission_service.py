@@ -151,7 +151,7 @@ class MissionService:
             result = await self._fail(runtime, model_sequence, "unexpected_error", str(exc))
             return result
 
-    async def _run_once(self, runtime: MissionRuntime, prompt: str) -> str:
+    async def _run_once(self, runtime: MissionRuntime, prompt: str) -> Any:
         session = self._agent_factory.create(runtime)
         extra = {"trace_id": runtime.context.trace_id}
         prompt_size = len(prompt)
@@ -192,8 +192,6 @@ class MissionService:
         )
         self._log_runtime_state(runtime)
         output = getattr(result, "output", result)
-        if not isinstance(output, str):
-            return str(output)
         return output
 
     def _promote_model(self, runtime: MissionRuntime, requested_model: str) -> Any | None:

@@ -74,6 +74,9 @@ def build_output_repair_prompt(context: RuntimeContext, raw_output: str, validat
         f"Validation error: {validation_error}",
         f"Mission prompt: {request.prompt}",
     ]
+    if request.output_schema is not None:
+        lines.append("Output schema:")
+        lines.append(json.dumps(request.output_schema, ensure_ascii=False, indent=2, sort_keys=True))
     lines.extend(_build_output_format_lines(request.output_schema))
     lines.append("Previous invalid output:")
     lines.append(_truncate(raw_output, 2000))
@@ -84,9 +87,8 @@ def _build_output_format_lines(schema: dict[str, Any] | None) -> list[str]:
     if schema is None:
         return ["If no output schema exists, return concise plain text."]
     return [
-        "If an output schema exists, return only valid JSON matching the schema.",
-        "Output schema:",
-        json.dumps(schema, ensure_ascii=False, indent=2, sort_keys=True),
+        "The final answer is structured and will be validated by the runtime.",
+        "Return only the final answer content and do not add markdown or commentary.",
     ]
 
 
