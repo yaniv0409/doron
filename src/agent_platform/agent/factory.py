@@ -28,6 +28,7 @@ except ImportError:  # pragma: no cover
 class AgentSession:
     runtime: MissionRuntime
     agent: Any
+    tool_names: list[str]
 
 
 class AgentFactory:
@@ -48,10 +49,11 @@ class AgentFactory:
             system_prompt=build_system_prompt(runtime.context),
             deps_type=MissionRuntime,
         )
-        self._register_tools(agent, runtime)
-        return AgentSession(runtime=runtime, agent=agent)
+        tool_names = self._register_tools(agent, runtime)
+        return AgentSession(runtime=runtime, agent=agent, tool_names=tool_names)
 
-    def _register_tools(self, agent: Any, runtime: MissionRuntime) -> None:
+    def _register_tools(self, agent: Any, runtime: MissionRuntime) -> list[str]:
+        tool_names: list[str] = []
         @agent.tool
         async def graph_read(
             ctx: RunContext[MissionRuntime],
@@ -59,52 +61,65 @@ class AgentFactory:
             parameters: dict[str, Any] | None = None,
         ) -> ToolResult:
             return await read_graph(ctx.deps, query, parameters)
+        tool_names.append("graph_read")
 
-        @agent.tool
-        async def graph_write(
-            ctx: RunContext[MissionRuntime],
-            query: str,
-            parameters: dict[str, Any] | None = None,
-        ) -> ToolResult:
-            if not ctx.deps.context.mission_request.db_mutation_enabled:
-                raise ConfigurationError("database mutation is disabled for this mission")
-            return await write_graph(ctx.deps, query, parameters)
+        if not runtime.services.settings.debug.disable_db_write_tool:
+            @agent.tool
+            async def graph_write(
+                ctx: RunContext[MissionRuntime],
+                query: str,
+                parameters: dict[str, Any] | None = None,
+            ) -> ToolResult:
+                if not ctx.deps.context.mission_request.db_mutation_enabled:
+                    raise ConfigurationError("database mutation is disabled for this mission")
+                return await write_graph(ctx.deps, query, parameters)
+            tool_names.append("graph_write")
 
         @agent.tool
         async def graph_schema(ctx: RunContext[MissionRuntime]) -> ToolResult:
             return await inspect_schema(ctx.deps)
+        tool_names.append("graph_schema")
 
         @agent.tool
         async def kuzu_reference(ctx: RunContext[MissionRuntime], query: str) -> ToolResult:
             return await lookup_kuzu_docs(ctx.deps, query)
+        tool_names.append("kuzu_reference")
 
-        @agent.tool
-        async def browser_open(ctx: RunContext[MissionRuntime], url: str) -> ToolResult:
-            if not ctx.deps.context.mission_request.web_enabled:
-                raise ConfigurationError("web access is disabled for this mission")
-            return await open_url(ctx.deps, url)
+        if not runtime.services.settings.debug.disable_browser_tools:
+            @agent.tool
+            async def browser_open(ctx: RunContext[MissionRuntime], url: str) -> ToolResult:
+                if not ctx.deps.context.mission_request.web_enabled:
+                    raise ConfigurationError("web access is disabled for this mission")
+                return await open_url(ctx.deps, url)
+            tool_names.append("browser_open")
 
-        @agent.tool
-        async def browser_text(ctx: RunContext[MissionRuntime]) -> ToolResult:
-            if not ctx.deps.context.mission_request.web_enabled:
-                raise ConfigurationError("web access is disabled for this mission")
-            return await get_page_text(ctx.deps)
+            @agent.tool
+            async def browser_text(ctx: RunContext[MissionRuntime]) -> ToolResult:
+                if not ctx.deps.context.mission_request.web_enabled:
+                    raise ConfigurationError("web access is disabled for this mission")
+                return await get_page_text(ctx.deps)
+            tool_names.append("browser_text")
 
-        @agent.tool
-        async def switch_model(
-            ctx: RunContext[MissionRuntime],
-            target_model: str,
-            reason: str,
-        ) -> str:
-            return await request_model_switch(ctx.deps, target_model, reason)
+        if not runtime.services.settings.debug.disable_model_switch_tool:
+            @agent.tool
+            async def switch_model(
+                ctx: RunContext[MissionRuntime],
+                target_model: str,
+                reason: str,
+            ) -> str:
+                return await request_model_switch(ctx.deps, target_model, reason)
+            tool_names.append("switch_model")
 
-        @agent.tool
-        async def clean_context(
-            ctx: RunContext[MissionRuntime],
-            reason: str,
-        ) -> ToolResult:
-            return await compress_context(ctx.deps, reason)
+        if runtime.services.settings.compression.tool_enabled and not runtime.services.settings.debug.disable_compression_tool:
+            @agent.tool
+            async def clean_context(
+                ctx: RunContext[MissionRuntime],
+                reason: str,
+            ) -> ToolResult:
+                return await compress_context(ctx.deps, reason)
+            tool_names.append("clean_context")
 
         runtime.context.tool_summaries.append(
-            "registered tools: graph_read, graph_write, graph_schema, kuzu_reference, browser_open, browser_text, switch_model, clean_context",
+            f"registered tools: {', '.join(tool_names)}",
         )
+        return tool_names

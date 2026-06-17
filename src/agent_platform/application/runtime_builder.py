@@ -4,6 +4,7 @@ import uuid
 from dataclasses import dataclass
 
 from agent_platform.config.settings import AppSettings
+from agent_platform.domain.models import RuntimeEvent
 from agent_platform.application.context_compression import ContextCompressor
 from agent_platform.domain.models import MissionRequest, RuntimeContext, utc_now
 from agent_platform.infrastructure.browser import PlaywrightBrowserEngine
@@ -56,7 +57,10 @@ class RuntimeBuilder:
             allowed_models=allowed_models,
         )
         db = KuzuGateway(request.db_path)
-        browser = PlaywrightBrowserEngine(self._services.settings.browser)
+        browser = PlaywrightBrowserEngine(
+            self._services.settings.browser,
+            telemetry_hook=lambda event: _record_browser_event(context, event),
+        )
         return MissionRuntime(
             context=context,
             db=db,
@@ -67,3 +71,19 @@ class RuntimeBuilder:
     @property
     def services(self) -> RuntimeServices:
         return self._services
+
+
+def _record_browser_event(context: RuntimeContext, event) -> None:
+    context.runtime_events.append(
+        RuntimeEvent(
+            phase=event.stage,
+            message=event.message,
+            metadata=dict(event.metadata),
+        )
+    )
+    if context.progress_hook is not None:
+        context.progress_hook(
+            phase=event.stage,
+            message=event.message,
+            metadata=dict(event.metadata),
+        )

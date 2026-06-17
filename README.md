@@ -10,6 +10,8 @@ Generic agent platform scaffold built around:
 Web extraction behavior:
 
 - Playwright navigation with `domcontentloaded` plus `networkidle` fallback
+- dedicated 15-second browser navigation timeout by default, configurable through environment
+- browser context configured to look like a normal desktop session
 - cleaned readable page text without HTML tags
 - structured extracted links from the rendered page
 
@@ -98,3 +100,4 @@ After each prompt, the terminal prints:
 - a compact ordered list of tools used
 
 Tool usage is traced canonically in `traces/<trace_id>/trace.json` and also written to rolling logs under `logs/`.
+Live execution progress is written to `traces/<trace_id>/progress.json`, including browser-stage events such as navigation start, `domcontentloaded`, `networkidle`, fallback, timeout, and extraction.

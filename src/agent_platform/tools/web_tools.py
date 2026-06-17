@@ -11,9 +11,10 @@ async def open_url(runtime: MissionRuntime, url: str) -> ToolResult:
     try:
         snapshot = await runtime.browser.navigate(url)
     except BrowserError as exc:
+        error_type = "browser_timeout" if "browser_timeout:" in str(exc) else "browser_navigation_error"
         result = error_result(
             "open_url",
-            "browser_navigation_error",
+            error_type,
             str(exc),
             "Try a different URL, simplify the task, or continue without web data if possible.",
         )
@@ -44,6 +45,7 @@ async def open_url(runtime: MissionRuntime, url: str) -> ToolResult:
         title=snapshot.title,
         summary=snapshot.text[:500],
         load_state=snapshot.load_state,
+        browser_stage=snapshot.browser_stage,
         links_count=len(snapshot.links),
     )
     runtime.context.web_artifacts.append(artifact)
@@ -66,9 +68,10 @@ async def get_page_text(runtime: MissionRuntime) -> ToolResult:
     try:
         snapshot = await runtime.browser.extract_text()
     except BrowserError as exc:
+        error_type = "browser_timeout" if "browser_timeout:" in str(exc) else "browser_extract_error"
         result = error_result(
             "get_page_text",
-            "browser_extract_error",
+            error_type,
             str(exc),
             "Open a page first or continue without web text if the answer is still possible.",
         )

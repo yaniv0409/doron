@@ -88,6 +88,7 @@ class WebArtifact(BaseModel):
     title: str | None = None
     summary: str | None = None
     load_state: str | None = None
+    browser_stage: str | None = None
     links_count: int = 0
     created_at: datetime = Field(default_factory=utc_now)
 
@@ -107,6 +108,13 @@ class CompressionEvent(BaseModel):
     size_after: int
     preview: str
     original_prompt_preserved: bool = True
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class RuntimeEvent(BaseModel):
+    phase: str
+    message: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -144,6 +152,7 @@ class RuntimeContext:
     db_mutations: list[DbMutationRecord] = field(default_factory=list)
     docs_lookups: list[DocumentationLookupRecord] = field(default_factory=list)
     compression_events: list[CompressionEvent] = field(default_factory=list)
+    runtime_events: list[RuntimeEvent] = field(default_factory=list)
     compressed_memory: CompressedMemory | None = None
     pending_context_refresh_reason: str | None = None
     compression_notice: str | None = None
@@ -152,6 +161,7 @@ class RuntimeContext:
     pending_model_switch: str | None = None
     browser_session_started: bool = False
     db_checkpoint_path: str | None = None
+    progress_hook: Any | None = None
 
     def build_transfer_packet(self) -> ContextTransferPacket:
         if self.compressed_memory is not None:
@@ -211,6 +221,7 @@ class ExecutionTrace(BaseModel):
     docs_lookups: list[DocumentationLookupRecord]
     web_artifacts: list[WebArtifact]
     compression_events: list[CompressionEvent]
+    runtime_events: list[RuntimeEvent]
     result: Any = None
     error: MissionError | None = None
     started_at: datetime

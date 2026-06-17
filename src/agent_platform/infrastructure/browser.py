@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from html import unescape
 from html.parser import HTMLParser
 from re import sub
+import asyncio
 from urllib.parse import urljoin
 
 from agent_platform.config.settings import BrowserSettings
@@ -35,34 +36,82 @@ class PageSnapshot:
     text: str
     links: list[PageLink]
     load_state: str
+    browser_stage: str
+
+
+@dataclass(slots=True)
+class BrowserTelemetry:
+    stage: str
+    message: str
+    metadata: dict[str, object]
 
 
 class PlaywrightBrowserEngine:
-    def __init__(self, settings: BrowserSettings) -> None:
+    def __init__(self, settings: BrowserSettings, telemetry_hook=None) -> None:
         self._settings = settings
         self._playwright = None
         self._browser: Browser | None = None
         self._page: Page | None = None
+        self._telemetry_hook = telemetry_hook
 
     async def start(self) -> None:
         if async_playwright is None:
             raise BrowserError("playwright is not installed")
         if self._browser is not None:
             return
+        await self._emit("browser_session", "starting playwright browser", {})
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(
             headless=self._settings.headless,
         )
-        page = await self._browser.new_page()
+        context = await self._browser.new_context(
+            viewport={
+                "width": self._settings.viewport_width,
+                "height": self._settings.viewport_height,
+            },
+            locale=self._settings.locale,
+            timezone_id=self._settings.timezone_id,
+            user_agent=self._settings.user_agent,
+            extra_http_headers={
+                "Accept-Language": self._settings.locale.replace("-", ",") + ";q=0.9",
+                "Upgrade-Insecure-Requests": "1",
+            },
+        )
+        await context.add_init_script(
+            """
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+            """
+        )
+        page = await context.new_page()
         page.set_default_timeout(self._settings.default_timeout_ms)
         self._page = page
+        await self._emit("browser_session", "browser session ready", {})
 
     async def navigate(self, url: str) -> PageSnapshot:
         page = await self._require_page()
         try:
-            await page.goto(url, wait_until="domcontentloaded")
-            load_state = await self._wait_for_network_idle(page)
+            await self._emit("browser_navigation", "navigation started", {"url": url})
+            load_state = await asyncio.wait_for(
+                self._navigate_with_budget(page, url),
+                timeout=self._settings.navigation_timeout_ms / 1000,
+            )
+            await self._emit(
+                "browser_navigation",
+                "navigation settled",
+                {"url": page.url, "load_state": load_state},
+            )
             snapshot = await self._extract_snapshot(page, load_state)
+        except asyncio.TimeoutError as exc:
+            await self._emit(
+                "browser_navigation",
+                "navigation timeout",
+                {"url": url, "timeout_ms": self._settings.navigation_timeout_ms},
+            )
+            raise BrowserError(
+                f"browser_timeout: navigation exceeded {self._settings.navigation_timeout_ms}ms during page load or network idle"
+            ) from exc
         except Exception as exc:  # pragma: no cover
             raise BrowserError(str(exc)) from exc
         return snapshot
@@ -70,6 +119,7 @@ class PlaywrightBrowserEngine:
     async def extract_text(self) -> PageSnapshot:
         page = await self._require_page()
         try:
+            await self._emit("browser_extract", "extracting current page text", {"url": page.url})
             return await self._extract_snapshot(page, "current_page")
         except Exception as exc:  # pragma: no cover
             raise BrowserError(str(exc)) from exc
@@ -96,15 +146,23 @@ class PlaywrightBrowserEngine:
 
     async def _wait_for_network_idle(self, page: Page) -> str:
         try:
+            await self._emit("browser_navigation", "network idle wait started", {"url": page.url})
             await page.wait_for_load_state(
                 "networkidle",
                 timeout=self._settings.network_idle_timeout_ms,
             )
+            await self._emit("browser_navigation", "network idle reached", {"url": page.url})
             return "networkidle"
         except Exception:
+            await self._emit(
+                "browser_navigation",
+                "network idle timeout fallback",
+                {"url": page.url, "timeout_ms": self._settings.network_idle_timeout_ms},
+            )
             return "domcontentloaded_fallback"
 
     async def _extract_snapshot(self, page: Page, load_state: str) -> PageSnapshot:
+        await self._emit("browser_extract", "snapshot extraction started", {"url": page.url, "load_state": load_state})
         title = await page.title()
         html = await page.content()
         scoped_html = select_main_html(
@@ -123,7 +181,20 @@ class PlaywrightBrowserEngine:
             text=text,
             links=links,
             load_state=load_state,
+            browser_stage="extract_complete",
         )
+
+    async def _navigate_with_budget(self, page: Page, url: str) -> str:
+        await page.goto(url, wait_until="domcontentloaded")
+        await self._emit("browser_navigation", "domcontentloaded reached", {"url": page.url})
+        return await self._wait_for_network_idle(page)
+
+    async def _emit(self, stage: str, message: str, metadata: dict[str, object]) -> None:
+        if self._telemetry_hook is None:
+            return
+        maybe = self._telemetry_hook(BrowserTelemetry(stage=stage, message=message, metadata=metadata))
+        if asyncio.iscoroutine(maybe):
+            await maybe
 
 
 def select_main_html(html: str, *, extract_main_content_only: bool) -> str:

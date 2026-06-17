@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
 from agent_platform.config.settings import CompressionSettings
 from agent_platform.domain.exceptions import ModelError
-from agent_platform.domain.models import CompressedMemory, CompressionEvent, ToolResult
+from agent_platform.domain.models import CompressedMemory, CompressionEvent, RuntimeEvent, ToolResult
 from agent_platform.tools.result_utils import error_result, success_result
 
 if TYPE_CHECKING:
@@ -28,12 +29,22 @@ class ContextCompressor:
         model = runtime.services.model_catalog.strongest_allowed(runtime.context.allowed_models)
         size_before = runtime.context.estimate_working_memory_size()
         try:
-            payload = await runtime.services.chat_client.complete_json(
-                model=model.name,
-                system_prompt=self._build_system_prompt(),
-                user_prompt=self._build_user_prompt(runtime, reason),
+            payload = await asyncio.wait_for(
+                runtime.services.chat_client.complete_json(
+                    model=model.name,
+                    system_prompt=self._build_system_prompt(),
+                    user_prompt=self._build_user_prompt(runtime, reason),
+                ),
+                timeout=runtime.services.settings.compression.timeout_seconds,
             )
             compressed = CompressedMemory.model_validate(payload)
+        except asyncio.TimeoutError as exc:
+            return error_result(
+                "compress_context",
+                "compression_timeout",
+                "context compression timed out",
+                "Continue with the current context or retry compression later.",
+            )
         except (ModelError, ValidationError, json.JSONDecodeError) as exc:
             return error_result(
                 "compress_context",
@@ -91,6 +102,18 @@ class ContextCompressor:
                 size_before=size_before,
                 size_after=size_after,
                 preview=self._preview(compressed),
+            )
+        )
+        runtime.context.runtime_events.append(
+            RuntimeEvent(
+                phase="compression",
+                message=f"context compression completed ({trigger})",
+                metadata={
+                    "reason": reason,
+                    "model": model_name,
+                    "size_before": size_before,
+                    "size_after": size_after,
+                },
             )
         )
 

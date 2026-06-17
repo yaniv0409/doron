@@ -2,7 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 from agent_platform.application.context_compression import ContextCompressor
-from agent_platform.config.settings import CompressionSettings
+from agent_platform.config.settings import AppSettings, CompressionSettings
 from agent_platform.domain.models import MissionRequest, ModelDescriptor, RuntimeContext, utc_now
 
 
@@ -39,17 +39,17 @@ def build_runtime() -> SimpleNamespace:
     context.db_findings = ["db finding"]
     context.web_findings = ["web finding"]
     context.tool_summaries = ["tool summary"]
+    compression_settings = CompressionSettings(
+        enabled=True,
+        threshold_ratio=0.1,
+        fallback_budget_chars=1000,
+        min_growth_chars=100,
+    )
     services = SimpleNamespace(
+        settings=AppSettings(compression=compression_settings),
         chat_client=FakeChatClient(),
         model_catalog=SimpleNamespace(strongest_allowed=lambda allowed: allowed[-1]),
-        context_compressor=ContextCompressor(
-            CompressionSettings(
-                enabled=True,
-                threshold_ratio=0.1,
-                fallback_budget_chars=1000,
-                min_growth_chars=100,
-            )
-        ),
+        context_compressor=ContextCompressor(compression_settings),
     )
     return SimpleNamespace(context=context, services=services)
 

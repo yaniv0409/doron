@@ -64,6 +64,11 @@ def apply_environment(settings: AppSettings, environ: dict[str, str] | os._Envir
     )
     _set_if_present(
         environ,
+        "AGENT_PLATFORM_BROWSER_NAVIGATION_TIMEOUT_MS",
+        lambda value: _setattr(settings.browser, "navigation_timeout_ms", int(value)),
+    )
+    _set_if_present(
+        environ,
         "AGENT_PLATFORM_BROWSER_NETWORK_IDLE_TIMEOUT_MS",
         lambda value: _setattr(settings.browser, "network_idle_timeout_ms", int(value)),
     )
@@ -84,6 +89,31 @@ def apply_environment(settings: AppSettings, environ: dict[str, str] | os._Envir
     )
     _set_if_present(
         environ,
+        "AGENT_PLATFORM_BROWSER_LOCALE",
+        lambda value: _setattr(settings.browser, "locale", value),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_BROWSER_TIMEZONE_ID",
+        lambda value: _setattr(settings.browser, "timezone_id", value),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_BROWSER_VIEWPORT_WIDTH",
+        lambda value: _setattr(settings.browser, "viewport_width", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_BROWSER_VIEWPORT_HEIGHT",
+        lambda value: _setattr(settings.browser, "viewport_height", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_BROWSER_USER_AGENT",
+        lambda value: _setattr(settings.browser, "user_agent", value),
+    )
+    _set_if_present(
+        environ,
         "AGENT_PLATFORM_KUZU_REFERENCE_PATH",
         lambda value: _setattr(settings.docs, "kuzu_reference_path", Path(value)),
     )
@@ -91,6 +121,11 @@ def apply_environment(settings: AppSettings, environ: dict[str, str] | os._Envir
         environ,
         "AGENT_PLATFORM_COMPRESSION_ENABLED",
         lambda value: _setattr(settings.compression, "enabled", _to_bool(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_COMPRESSION_TOOL_ENABLED",
+        lambda value: _setattr(settings.compression, "tool_enabled", _to_bool(value)),
     )
     _set_if_present(
         environ,
@@ -121,6 +156,36 @@ def apply_environment(settings: AppSettings, environ: dict[str, str] | os._Envir
         environ,
         "AGENT_PLATFORM_COMPRESSION_MAX_TOOL_SUMMARIES",
         lambda value: _setattr(settings.compression, "max_tool_summaries", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_COMPRESSION_TIMEOUT_SECONDS",
+        lambda value: _setattr(settings.compression, "timeout_seconds", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_AGENT_RUN_TIMEOUT_SECONDS",
+        lambda value: _setattr(settings.runtime, "agent_run_timeout_seconds", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_DISABLE_BROWSER_TOOLS",
+        lambda value: _setattr(settings.debug, "disable_browser_tools", _to_bool(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_DISABLE_MODEL_SWITCH_TOOL",
+        lambda value: _setattr(settings.debug, "disable_model_switch_tool", _to_bool(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_DISABLE_COMPRESSION_TOOL",
+        lambda value: _setattr(settings.debug, "disable_compression_tool", _to_bool(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_DISABLE_DB_WRITE_TOOL",
+        lambda value: _setattr(settings.debug, "disable_db_write_tool", _to_bool(value)),
     )
     _set_if_present(
         environ,
