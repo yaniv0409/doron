@@ -28,18 +28,14 @@ class MemoryManager:
         results = await self.search(
             runtime.db,
             runtime.context.mission_request.prompt,
-            kinds=None,
+            kinds=["skill"],
             limit=self._settings.preflight_limit,
             source="preflight",
         )
         runtime.context.memory_retrievals.append(
-            MemoryRetrievalRecord(query=runtime.context.mission_request.prompt, kinds=[], results=results, source="preflight")
+            MemoryRetrievalRecord(query=runtime.context.mission_request.prompt, kinds=["skill"], results=results, source="preflight")
         )
         runtime.context.retrieved_skills = [item for item in results if item.kind == "skill"]
-        runtime.context.retrieved_source_packs = [item for item in results if item.kind == "source_pack"]
-        runtime.context.durable_memories = [
-            item for item in results if item.kind not in {"skill", "source_pack"}
-        ]
 
     async def search(
         self,
@@ -70,7 +66,7 @@ class MemoryManager:
         return await self.search(
             db,
             trace_text,
-            kinds=None,
+            kinds=["skill"],
             limit=self._settings.maintenance_related_memory_limit,
             source="maintenance_related",
         )

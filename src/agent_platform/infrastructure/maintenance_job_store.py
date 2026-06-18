@@ -101,7 +101,7 @@ class MaintenanceJobStore:
             {
                 "trace_id": record.trace_id,
                 "status": "queued",
-                "mission_kind": "memory_maintenance",
+                "mission_kind": "skill_maintenance",
                 "parent_trace_id": record.parent_trace_id,
                 "parent_trace_path": str(self._trace_store.trace_path(parent_trace.trace_id)),
                 "request": request_payload,
@@ -117,7 +117,7 @@ class MaintenanceJobStore:
             {
                 "trace_id": record.trace_id,
                 "status": "cancelled",
-                "mission_kind": "memory_maintenance",
+                "mission_kind": "skill_maintenance",
                 "parent_trace_id": record.parent_trace_id,
                 "request": record.request.model_dump(mode="json"),
                 "model_sequence": [],

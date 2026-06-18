@@ -40,7 +40,7 @@ def _build_fake_runtime(request: MissionRequest, settings: AppSettings, *, memor
     )
 
 
-def test_main_prompt_includes_preflight_memory_context() -> None:
+def test_main_prompt_includes_preflight_skill_context() -> None:
     async def fake_preflight(runtime) -> None:
         runtime.context.retrieved_skills = [
             DurableMemoryRecord(
@@ -71,17 +71,17 @@ def test_main_prompt_includes_preflight_memory_context() -> None:
         trace_id="trace-1",
         model_dump=lambda mode="json": {},
     )
-    service._maybe_schedule_memory_maintenance = lambda trace: None
+    service._maybe_schedule_skill_maintenance = lambda trace: None
 
     result = asyncio.run(service.run(MissionRequest(prompt="research nVent", db_path="/tmp/demo.kuzu")))
 
     assert result.status.value == "completed"
-    assert "Learned context from durable memory" in captured_prompts[0]
+    assert "Learned skill context" in captured_prompts[0]
     assert "Use source packs first" in captured_prompts[0]
-    assert "Empty memory is not a stop signal" in captured_prompts[0]
+    assert "Empty skills are not a stop signal" in captured_prompts[0]
 
 
-def test_mission_service_schedules_background_memory_maintenance(tmp_path: Path) -> None:
+def test_mission_service_schedules_background_skill_maintenance(tmp_path: Path) -> None:
     async def scenario() -> None:
         settings = AppSettings()
         settings.traces.directory = tmp_path / "traces"
@@ -149,27 +149,27 @@ def test_maintenance_run_writes_trace_skeleton(tmp_path: Path) -> None:
             return "maintenance summary"
 
         request = MissionRequest(
-            prompt="maintain memory",
+            prompt="maintain skills",
             db_path="/tmp/demo.kuzu",
-            mission_metadata={"mission_kind": "memory_maintenance", "parent_trace_id": "parent-1"},
+            mission_metadata={"mission_kind": "skill_maintenance", "parent_trace_id": "parent-1"},
             web_enabled=False,
         )
         service._runtime_builder.build = build_runtime
         service._run_once = fake_run_once
         service._persist_trace = lambda *args, **kwargs: SimpleNamespace(request=request, trace_id="trace-maint")  # type: ignore[assignment]
-        service._maybe_schedule_memory_maintenance = lambda trace: None
+        service._maybe_schedule_skill_maintenance = lambda trace: None
 
         await service.run(request)
 
         assert captured
-        assert captured[0][1]["mission_kind"] == "memory_maintenance"
+        assert captured[0][1]["mission_kind"] == "skill_maintenance"
         assert captured[0][1]["parent_trace_id"] == "parent-1"
         assert captured[0][1]["status"] == "started"
 
     asyncio.run(scenario())
 
 
-def test_memory_maintenance_prompt_uses_trace_head_not_full_trace(tmp_path: Path) -> None:
+def test_skill_maintenance_prompt_uses_trace_head_not_full_trace(tmp_path: Path) -> None:
     settings = AppSettings()
     settings.traces.directory = tmp_path / "traces"
     settings.traces.checkpoint_directory = tmp_path / "checkpoints"
@@ -181,8 +181,8 @@ def test_memory_maintenance_prompt_uses_trace_head_not_full_trace(tmp_path: Path
     )
 
     trace = SimpleNamespace(trace_id="parent-trace")
-    prompt = service._build_memory_maintenance_prompt(trace)  # type: ignore[arg-type]
+    prompt = service._build_skill_maintenance_prompt(trace)  # type: ignore[arg-type]
 
     assert "Parent trace ID: parent-trace" in prompt
     assert "0123456789ABCDEFGH" in prompt
-    assert "Use trace_grep to inspect other relevant parts" in prompt
+    assert "harden Doron's skills" in prompt

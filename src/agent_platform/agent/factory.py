@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from agent_platform.agent.prompts import build_system_prompt
@@ -11,11 +12,14 @@ from agent_platform.application.runtime_builder import MissionRuntime
 from agent_platform.domain.exceptions import ConfigurationError, ModelSwitchRequested
 from agent_platform.domain.models import ToolResult
 from agent_platform.tools.compression_tools import compress_context
-from agent_platform.tools.db_tools import inspect_schema, read_graph, write_graph
-from agent_platform.tools.docs_tools import lookup_kuzu_docs
-from agent_platform.tools.memory_tools import deprecate_memory, read_memory, search_memory, update_memory, write_memory
+from agent_platform.tools.memory_tools import (
+    skill_deprecate as run_skill_deprecate,
+    skill_read as run_skill_read,
+    skill_search as run_skill_search,
+    skill_update as run_skill_update,
+    skill_write as run_skill_write,
+)
 from agent_platform.tools.model_tools import request_model_switch
-from agent_platform.tools.trace_tools import grep_trace, read_trace_head
 from agent_platform.tools.web_tools import get_page_text, open_url
 
 try:
@@ -62,169 +66,61 @@ class AgentFactory:
 
     def _register_tools(self, agent: Any, runtime: MissionRuntime) -> list[str]:
         tool_names: list[str] = []
-        is_memory_maintenance = runtime.context.mission_request.mission_metadata.get("mission_kind") == "memory_maintenance" if runtime.context.mission_request.mission_metadata else False
-
-        @agent.tool
-        async def graph_read(
-            ctx: RunContext[MissionRuntime],
-            query: str,
-            reason: str,
-            parameters: dict[str, Any] | None = None,
-        ) -> ToolResult:
-            arguments = {"query": query, "parameters": parameters or {}, "reason": reason}
-            self._emit_tool_started(ctx.deps, "graph_read", arguments)
-            result = await read_graph(ctx.deps, query, reason, parameters)
-            self._emit_tool_completed(ctx.deps, "graph_read", arguments, result)
-            return result
-        tool_names.append("graph_read")
-
-        if not runtime.services.settings.debug.disable_db_write_tool and not is_memory_maintenance:
-            @agent.tool
-            async def graph_write(
-                ctx: RunContext[MissionRuntime],
-                query: str,
-                reason: str,
-                parameters: dict[str, Any] | None = None,
-            ) -> ToolResult:
-                if not ctx.deps.context.mission_request.db_mutation_enabled:
-                    raise ConfigurationError("database mutation is disabled for this mission")
-                arguments = {"query": query, "parameters": parameters or {}, "reason": reason}
-                self._emit_tool_started(ctx.deps, "graph_write", arguments)
-                result = await write_graph(ctx.deps, query, reason, parameters)
-                self._emit_tool_completed(ctx.deps, "graph_write", arguments, result)
-                return result
-            tool_names.append("graph_write")
-
-        @agent.tool
-        async def graph_schema(ctx: RunContext[MissionRuntime], reason: str) -> ToolResult:
-            arguments: dict[str, Any] = {"reason": reason}
-            self._emit_tool_started(ctx.deps, "graph_schema", arguments)
-            result = await inspect_schema(ctx.deps, reason)
-            self._emit_tool_completed(ctx.deps, "graph_schema", arguments, result)
-            return result
-        tool_names.append("graph_schema")
-
-        @agent.tool
-        async def kuzu_reference(ctx: RunContext[MissionRuntime], query: str, reason: str) -> ToolResult:
-            arguments = {"query": query, "reason": reason}
-            self._emit_tool_started(ctx.deps, "kuzu_reference", arguments)
-            result = await lookup_kuzu_docs(ctx.deps, query, reason)
-            self._emit_tool_completed(ctx.deps, "kuzu_reference", arguments, result)
-            return result
-        tool_names.append("kuzu_reference")
+        is_skill_maintenance = runtime.context.mission_request.mission_metadata.get("mission_kind") == "skill_maintenance" if runtime.context.mission_request.mission_metadata else False
 
         if runtime.services.settings.memory.enabled:
-            @agent.tool
-            async def memory_search(ctx: RunContext[MissionRuntime], query: str, reason: str) -> ToolResult:
-                arguments = {"query": query, "reason": reason}
-                self._emit_tool_started(ctx.deps, "memory_search", arguments)
-                result = await search_memory(ctx.deps, query, reason)
-                self._emit_tool_completed(ctx.deps, "memory_search", arguments, result)
-                return result
-            tool_names.append("memory_search")
-
-            @agent.tool
-            async def memory_read(ctx: RunContext[MissionRuntime], ids: list[str], reason: str) -> ToolResult:
-                arguments = {"ids": ids, "reason": reason}
-                self._emit_tool_started(ctx.deps, "memory_read", arguments)
-                result = await read_memory(ctx.deps, ids, reason)
-                self._emit_tool_completed(ctx.deps, "memory_read", arguments, result)
-                return result
-            tool_names.append("memory_read")
-
             @agent.tool
             async def skill_search(ctx: RunContext[MissionRuntime], query: str, reason: str) -> ToolResult:
                 arguments = {"query": query, "reason": reason}
                 self._emit_tool_started(ctx.deps, "skill_search", arguments)
-                result = await search_memory(ctx.deps, query, reason, kinds=["skill"], tool_name="skill_search")
+                result = await run_skill_search(ctx.deps, query, reason)
                 self._emit_tool_completed(ctx.deps, "skill_search", arguments, result)
                 return result
             tool_names.append("skill_search")
 
-            @agent.tool
-            async def source_pack_search(ctx: RunContext[MissionRuntime], query: str, reason: str) -> ToolResult:
-                arguments = {"query": query, "reason": reason}
-                self._emit_tool_started(ctx.deps, "source_pack_search", arguments)
-                result = await search_memory(
-                    ctx.deps,
-                    query,
-                    reason,
-                    kinds=["source_pack"],
-                    tool_name="source_pack_search",
-                )
-                self._emit_tool_completed(ctx.deps, "source_pack_search", arguments, result)
-                return result
-            tool_names.append("source_pack_search")
-
-            if is_memory_maintenance:
+            if is_skill_maintenance:
                 @agent.tool
-                async def trace_head(
-                    ctx: RunContext[MissionRuntime],
-                    reason: str,
-                    chars: int | None = None,
-                ) -> ToolResult:
-                    arguments = {"reason": reason, "chars": chars}
-                    self._emit_tool_started(ctx.deps, "trace_head", arguments)
-                    result = await read_trace_head(ctx.deps, reason, chars)
-                    self._emit_tool_completed(ctx.deps, "trace_head", arguments, result)
+                async def skill_read(ctx: RunContext[MissionRuntime], ids: list[str], reason: str) -> ToolResult:
+                    arguments = {"ids": ids, "reason": reason}
+                    self._emit_tool_started(ctx.deps, "skill_read", arguments)
+                    result = await run_skill_read(ctx.deps, ids, reason)
+                    self._emit_tool_completed(ctx.deps, "skill_read", arguments, result)
                     return result
-                tool_names.append("trace_head")
+                tool_names.append("skill_read")
 
                 @agent.tool
-                async def trace_grep(
-                    ctx: RunContext[MissionRuntime],
-                    pattern: str,
-                    reason: str,
-                    radius_lines: int | None = None,
-                ) -> ToolResult:
-                    arguments = {"pattern": pattern, "reason": reason, "radius_lines": radius_lines}
-                    self._emit_tool_started(ctx.deps, "trace_grep", arguments)
-                    result = await grep_trace(ctx.deps, pattern, reason, radius_lines)
-                    self._emit_tool_completed(ctx.deps, "trace_grep", arguments, result)
-                    return result
-                tool_names.append("trace_grep")
-
-                @agent.tool
-                async def memory_write(
-                    ctx: RunContext[MissionRuntime],
-                    entries: list[dict[str, Any]],
-                    reason: str,
-                ) -> ToolResult:
+                async def skill_write(ctx: RunContext[MissionRuntime], entries: list[dict[str, Any]], reason: str) -> ToolResult:
                     arguments = {"entry_count": len(entries), "reason": reason}
-                    self._emit_tool_started(ctx.deps, "memory_write", arguments)
-                    result = await write_memory(ctx.deps, entries, reason)
-                    self._emit_tool_completed(ctx.deps, "memory_write", arguments, result)
+                    self._emit_tool_started(ctx.deps, "skill_write", arguments)
+                    result = await run_skill_write(ctx.deps, entries, reason)
+                    self._emit_tool_completed(ctx.deps, "skill_write", arguments, result)
                     return result
-                tool_names.append("memory_write")
+                tool_names.append("skill_write")
 
                 @agent.tool
-                async def memory_update(
-                    ctx: RunContext[MissionRuntime],
-                    entries: list[dict[str, Any]],
-                    reason: str,
-                ) -> ToolResult:
+                async def skill_update(ctx: RunContext[MissionRuntime], entries: list[dict[str, Any]], reason: str) -> ToolResult:
                     arguments = {"entry_count": len(entries), "reason": reason}
-                    self._emit_tool_started(ctx.deps, "memory_update", arguments)
-                    result = await update_memory(ctx.deps, entries, reason)
-                    self._emit_tool_completed(ctx.deps, "memory_update", arguments, result)
+                    self._emit_tool_started(ctx.deps, "skill_update", arguments)
+                    result = await run_skill_update(ctx.deps, entries, reason)
+                    self._emit_tool_completed(ctx.deps, "skill_update", arguments, result)
                     return result
-                tool_names.append("memory_update")
+                tool_names.append("skill_update")
 
                 @agent.tool
-                async def memory_deprecate(
+                async def skill_deprecate(
                     ctx: RunContext[MissionRuntime],
                     ids: list[str],
                     reason: str,
                     replacement_id: str | None = None,
                 ) -> ToolResult:
                     arguments = {"ids": ids, "replacement_id": replacement_id, "reason": reason}
-                    self._emit_tool_started(ctx.deps, "memory_deprecate", arguments)
-                    result = await deprecate_memory(ctx.deps, ids, reason, replacement_id)
-                    self._emit_tool_completed(ctx.deps, "memory_deprecate", arguments, result)
+                    self._emit_tool_started(ctx.deps, "skill_deprecate", arguments)
+                    result = await run_skill_deprecate(ctx.deps, ids, reason, replacement_id)
+                    self._emit_tool_completed(ctx.deps, "skill_deprecate", arguments, result)
                     return result
-                tool_names.append("memory_deprecate")
+                tool_names.append("skill_deprecate")
 
-        if not runtime.services.settings.debug.disable_browser_tools and not is_memory_maintenance:
+        if not runtime.services.settings.debug.disable_browser_tools and not is_skill_maintenance:
             @agent.tool
             async def browser_open(ctx: RunContext[MissionRuntime], urls: list[str], reason: str) -> ToolResult:
                 if not ctx.deps.context.mission_request.web_enabled:
@@ -248,22 +144,24 @@ class AgentFactory:
             tool_names.append("browser_text")
 
         if not runtime.services.settings.debug.disable_model_switch_tool:
-            @agent.tool
+            target_model_type = self._build_target_model_type(runtime)
+
             async def switch_model(
                 ctx: RunContext[MissionRuntime],
                 target_model: str,
                 reason: str,
             ) -> str:
-                arguments = {"target_model": target_model, "reason": reason}
+                target_name = target_model.value if hasattr(target_model, "value") else str(target_model)
+                arguments = {"target_model": target_name, "reason": reason}
                 self._emit_tool_started(ctx.deps, "switch_model", arguments)
                 try:
-                    result = await request_model_switch(ctx.deps, target_model, reason)
+                    result = await request_model_switch(ctx.deps, target_name, reason)
                 except ModelSwitchRequested as exc:
                     self._emit_tool_completed(
                         ctx.deps,
                         "switch_model",
                         arguments,
-                        f"requested switch to {target_model}",
+                        f"requested switch to {target_name}",
                     )
                     raise
                 except Exception as exc:
@@ -279,6 +177,8 @@ class AgentFactory:
                     raise
                 self._emit_tool_completed(ctx.deps, "switch_model", arguments, result)
                 return result
+            switch_model.__annotations__["target_model"] = target_model_type
+            agent.tool(switch_model)
             tool_names.append("switch_model")
 
         if runtime.services.settings.compression.tool_enabled and not runtime.services.settings.debug.disable_compression_tool:
@@ -298,6 +198,23 @@ class AgentFactory:
             f"registered tools: {', '.join(tool_names)}",
         )
         return tool_names
+
+    def _build_target_model_type(self, runtime: MissionRuntime) -> type[Enum]:
+        allowed_models = runtime.context.allowed_models
+        members = {
+            self._sanitize_enum_name(model.name, index): model.name
+            for index, model in enumerate(allowed_models)
+        }
+        return Enum("SwitchModelTarget", members, type=str)
+
+    def _sanitize_enum_name(self, name: str, index: int) -> str:
+        slug = [char.upper() if char.isalnum() else "_" for char in name]
+        value = "".join(slug).strip("_")
+        if not value:
+            value = f"MODEL_{index}"
+        if value[0].isdigit():
+            value = f"MODEL_{value}"
+        return value
 
     def _emit_tool_started(self, runtime: MissionRuntime, name: str, arguments: dict[str, Any]) -> None:
         emit_runtime_event(

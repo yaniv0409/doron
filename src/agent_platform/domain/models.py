@@ -342,11 +342,7 @@ class RuntimeContext:
         return items
 
     def build_learned_context_block(self) -> str:
-        groups = [
-            ("Relevant skills", self.retrieved_skills),
-            ("Known source packs", self.retrieved_source_packs),
-            ("Relevant memories", self.durable_memories),
-        ]
+        groups = [("Relevant skills", self.retrieved_skills)]
         lines: list[str] = []
         for label, records in groups:
             if not records:

@@ -11,38 +11,36 @@ def build_system_prompt(context: RuntimeContext) -> str:
     mission_kind = (request.mission_metadata or {}).get("mission_kind", "research")
     prompt_lines = [
         "You are a generic autonomous agent operating through explicit tools.",
-        "Use the graph database, browser, Kuzu documentation, and learned memory tools when needed.",
+        "Use skill tools and the web when needed.",
         "Keep intermediate reasoning concise and tool-oriented.",
         f"Every tool call must include a short reason argument.",
         "Tool calls may return structured results with fields: ok, tool, error_type, error_message, retry_hint, data.",
         "If a tool returns ok=false, do not give up. Read the error, decide the next step, and continue if the mission is still solvable.",
-        "For database lookup failures, prefer: inspect schema, reformulate the query, consult Kuzu reference, then use web or model knowledge if needed.",
-        "Prefer learned memories, skills, and source packs before rediscovering schema or browsing.",
-        "Do not recreate graph structures or rediscover web sources if learned memory already covers them.",
-        "If memory, skills, or source packs are empty or insufficient, keep exploring. Empty memory is not a stop signal.",
-        "When prior memory does not answer the task, decide whether to inspect the graph/schema next or browse the web next based on what is most likely to move the mission forward.",
+        "Prefer learned skills before browsing.",
+        "Do not recreate skill knowledge or repeat web discovery if a skill already covers it.",
+        "If skills are empty or insufficient, keep exploring with the web. Empty skills are not a stop signal.",
+        "When prior skills do not answer the task, browse the web next if that is most likely to move the mission forward.",
         f"The browser_open tool accepts a batch of URLs and may return partial results if some URLs fail.",
         f"Web tool budget: {context.web_tool_budget()} browser calls per mission; used so far: {context.web_tool_calls_used}; remaining: {context.web_tool_calls_remaining()}.",
         "A compress_context tool exists. Use it when working memory has become large or repetitive.",
         "The original mission prompt always remains unchanged. Compressed working memory may replace older notes and is authoritative after compression.",
         "If a stronger model is necessary, call the model-switch tool with a short reason.",
     ]
-    if context.memory_tool_call_budget is not None:
+    if context.allowed_models:
         prompt_lines.append(
-            f"Memory tool budget: {context.memory_tool_call_budget} calls per mission; used so far: {context.memory_tool_calls_used}; remaining: {max(0, context.memory_tool_call_budget - context.memory_tool_calls_used)}."
+            "Allowed model switch targets: " + ", ".join(item.name for item in context.allowed_models)
         )
     learned_context = context.build_learned_context_block()
     if learned_context:
-        prompt_lines.append("Learned context from durable memory:")
+        prompt_lines.append("Learned skill context:")
         prompt_lines.append(learned_context)
-    if mission_kind == "memory_maintenance":
+    if mission_kind == "skill_maintenance":
         prompt_lines.extend(
             [
-                "This is a post-mission memory maintenance run.",
-                "Improve future tool efficiency by writing, updating, or deprecating durable memory records.",
-                "Use graph reads for self-inspection when needed, but only mutate durable memory records.",
-                "Prefer distilled lessons, schema facts, source packs, and anti-patterns over raw dumps.",
-                "The mission prompt contains only the opening portion of the parent trace. Use trace_head and trace_grep to inspect the stored trace before making memory changes.",
+                "This is a post-mission skill maintenance run.",
+                "Improve future tool efficiency by writing, updating, or deprecating skills.",
+                "Only use skill tools and keep the output concise.",
+                "Prefer distilled lessons and anti-patterns over raw dumps.",
             ]
         )
     prompt_lines.extend(_build_output_format_lines(request.output_schema))

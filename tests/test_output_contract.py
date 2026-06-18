@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from types import SimpleNamespace
+from enum import Enum
 
 import pytest
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -118,14 +120,14 @@ def test_agent_factory_passes_structured_output_type() -> None:
     assert validated.model_dump(mode="json") == {"answer": "ok"}
 
 
-def test_agent_factory_registers_trace_tools_for_memory_maintenance_only() -> None:
+def test_agent_factory_registers_skill_tools_for_maintenance_only() -> None:
     settings = AppSettings()
     settings.openrouter.api_key = "test-key"
     runtime = _build_runtime_wrapper(
         MissionRequest(
             prompt="maintain",
             db_path="/tmp/db.kuzu",
-            mission_metadata={"mission_kind": "memory_maintenance", "parent_trace_id": "trace-parent"},
+            mission_metadata={"mission_kind": "skill_maintenance", "parent_trace_id": "trace-parent"},
             web_enabled=False,
         ),
         settings,
@@ -161,11 +163,78 @@ def test_agent_factory_registers_trace_tools_for_memory_maintenance_only() -> No
         factory_module.OpenRouterModel = original_model
         factory_module.OpenRouterProvider = original_provider
 
-    assert "trace_head" in session.tool_names
-    assert "trace_grep" in session.tool_names
-    assert "memory_write" in session.tool_names
+    assert "skill_search" in session.tool_names
+    assert "skill_read" in session.tool_names
+    assert "skill_write" in session.tool_names
+    assert "skill_update" in session.tool_names
+    assert "skill_deprecate" in session.tool_names
     assert "browser_open" not in session.tool_names
     assert "browser_text" not in session.tool_names
+
+
+def test_switch_model_tool_schema_matches_allowed_models() -> None:
+    settings = AppSettings()
+    settings.openrouter.api_key = "test-key"
+    settings.models = [
+        ModelDescriptor(name="openai/gpt-4.1-mini", rank=10, context_window=4000, is_default=True),
+        ModelDescriptor(name="openai/gpt-5.2", rank=100, context_window=8000),
+        ModelDescriptor(name="anthropic/claude-3.7-sonnet", rank=80, context_window=8000),
+    ]
+    runtime = _build_runtime_wrapper(
+        MissionRequest(
+            prompt="research",
+            db_path="/tmp/db.kuzu",
+            allowed_models=["openai/gpt-4.1-mini", "anthropic/claude-3.7-sonnet"],
+        ),
+        settings,
+    )
+    runtime.context.allowed_models = [
+        ModelDescriptor(name="openai/gpt-4.1-mini", rank=10, context_window=4000, is_default=True),
+        ModelDescriptor(name="anthropic/claude-3.7-sonnet", rank=80, context_window=8000),
+    ]
+
+    class FakeProvider:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+    class FakeModel:
+        def __init__(self, name, provider) -> None:
+            self.name = name
+            self.provider = provider
+
+    class FakeAgent:
+        def __init__(self, model, **kwargs) -> None:
+            self.model = model
+            self.kwargs = kwargs
+            self.tools: dict[str, object] = {}
+
+        def tool(self, fn):
+            self.tools[fn.__name__] = fn
+            return fn
+
+    original_agent = factory_module.Agent
+    original_model = factory_module.OpenRouterModel
+    original_provider = factory_module.OpenRouterProvider
+    try:
+        factory_module.Agent = FakeAgent
+        factory_module.OpenRouterModel = FakeModel
+        factory_module.OpenRouterProvider = FakeProvider
+        session = AgentFactory().create(runtime)
+    finally:
+        factory_module.Agent = original_agent
+        factory_module.OpenRouterModel = original_model
+        factory_module.OpenRouterProvider = original_provider
+
+    switch_tool = session.agent.tools["switch_model"]
+    annotation = inspect.signature(switch_tool).parameters["target_model"].annotation
+    assert issubclass(annotation, Enum)
+    assert [item.value for item in annotation] == [
+        "openai/gpt-4.1-mini",
+        "anthropic/claude-3.7-sonnet",
+    ]
+    assert "Allowed model switch targets: openai/gpt-4.1-mini, anthropic/claude-3.7-sonnet" in build_system_prompt(
+        runtime.context
+    )
 
 
 def test_prompt_builders_keep_structured_output_hint_after_refresh() -> None:

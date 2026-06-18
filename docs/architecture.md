@@ -28,7 +28,7 @@ Core runtime:
 4. The agent uses explicit tools for graph work, browser work, documentation lookup, and model switching.
 5. Structured output is validated against caller-provided JSON Schema.
 6. Logs and a normalized trace are written to disk.
-7. When enabled, the main mission enqueues a durable maintenance job and a `MaintenanceRunner` resumes it from persisted state.
+7. When enabled, the main mission enqueues a durable skill-maintenance job and a `MaintenanceRunner` resumes it from persisted state.
 
 ## Boundaries
 

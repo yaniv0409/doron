@@ -146,7 +146,7 @@ class MissionService:
                     completed_at=completed_at,
                 )
                 trace = self._persist_trace(runtime, model_sequence, mission_result, None)
-                self._maybe_schedule_memory_maintenance(trace)
+                self._maybe_schedule_skill_maintenance(trace)
                 await runtime.browser.close()
                 return mission_result
         except asyncio.TimeoutError:
@@ -268,20 +268,20 @@ class MissionService:
         )
         trace = self._persist_trace(runtime, model_sequence, result, error)
         self._append_runtime_event(runtime, "failed", message, {"code": code})
-        self._maybe_schedule_memory_maintenance(trace)
+        self._maybe_schedule_skill_maintenance(trace)
         await runtime.browser.close()
         self._logger.error(message, extra={"trace_id": runtime.context.trace_id})
         return result
 
     def _prepare_runtime(self, runtime: MissionRuntime) -> None:
         metadata = runtime.context.mission_request.mission_metadata or {}
-        if metadata.get("mission_kind") == "memory_maintenance":
+        if metadata.get("mission_kind") == "skill_maintenance":
             runtime.context.memory_tool_call_budget = runtime.services.settings.memory.maintenance_tool_budget
             runtime.services.memory_manager.ensure_schema(runtime.db)
 
     def _write_trace_skeleton(self, runtime: MissionRuntime, request_payload: dict[str, Any]) -> None:
         metadata = runtime.context.mission_request.mission_metadata or {}
-        if metadata.get("mission_kind") != "memory_maintenance":
+        if metadata.get("mission_kind") != "skill_maintenance":
             return
         parent_trace_id = metadata.get("parent_trace_id")
         parent_trace_path = None
@@ -292,7 +292,7 @@ class MissionService:
             {
                 "trace_id": runtime.context.trace_id,
                 "status": "started",
-                "mission_kind": "memory_maintenance",
+                "mission_kind": "skill_maintenance",
                 "parent_trace_id": parent_trace_id,
                 "parent_trace_path": parent_trace_path,
                 "request": request_payload,
@@ -306,7 +306,7 @@ class MissionService:
         if not runtime.services.settings.memory.enabled:
             return
         metadata = runtime.context.mission_request.mission_metadata or {}
-        if metadata.get("mission_kind") == "memory_maintenance":
+        if metadata.get("mission_kind") == "skill_maintenance":
             parent_trace_id = metadata.get("parent_trace_id")
             if isinstance(parent_trace_id, str) and parent_trace_id:
                 trace_text = runtime.services.trace_store.read_raw_trace_text(parent_trace_id)
@@ -322,17 +322,15 @@ class MissionService:
                         source="maintenance_preflight",
                     )
                 )
-                runtime.context.durable_memories = [item for item in results if item.kind == "memory"]
                 runtime.context.retrieved_skills = [item for item in results if item.kind == "skill"]
-                runtime.context.retrieved_source_packs = [item for item in results if item.kind == "source_pack"]
             return
         await runtime.services.memory_manager.preflight(runtime)
 
-    def _maybe_schedule_memory_maintenance(self, trace: ExecutionTrace) -> None:
+    def _maybe_schedule_skill_maintenance(self, trace: ExecutionTrace) -> None:
         if trace is None:
             return
         metadata = trace.request.mission_metadata or {}
-        if metadata.get("mission_kind") == "memory_maintenance":
+        if metadata.get("mission_kind") == "skill_maintenance":
             return
         if not self._runtime_builder.services.settings.memory.maintenance_enabled:
             return
@@ -341,50 +339,49 @@ class MissionService:
             return
         self._maintenance_runner.enqueue(trace)
 
-    def build_memory_maintenance_request(self, trace: ExecutionTrace) -> MissionRequest:
+    def build_skill_maintenance_request(self, trace: ExecutionTrace) -> MissionRequest:
         strongest = self._runtime_builder.services.model_catalog.strongest_allowed(
             self._runtime_builder.services.model_catalog.resolve_allowed(trace.request)
         )
         return MissionRequest(
-            prompt=self._build_memory_maintenance_prompt(trace),
+            prompt=self._build_skill_maintenance_prompt(trace),
             db_path=trace.request.db_path,
             preferred_model=strongest.name,
             allowed_models=[item.name for item in self._runtime_builder.services.model_catalog.resolve_allowed(trace.request)],
             mission_metadata={
-                "mission_kind": "memory_maintenance",
+                "mission_kind": "skill_maintenance",
                 "parent_trace_id": trace.trace_id,
             },
             web_enabled=False,
             db_mutation_enabled=True,
         )
 
-    async def _run_memory_maintenance(self, trace: ExecutionTrace) -> None:
-        request = self.build_memory_maintenance_request(trace)
+    async def _run_skill_maintenance(self, trace: ExecutionTrace) -> None:
+        request = self.build_skill_maintenance_request(trace)
         try:
             await self.run(request)
         except Exception as exc:  # pragma: no cover
             self._logger.error(
-                "memory maintenance failed: %s",
+                "skill maintenance failed: %s",
                 exc,
                 extra={"trace_id": trace.trace_id},
             )
 
-    def _build_memory_maintenance_prompt(self, trace: ExecutionTrace) -> str:
+    def _build_skill_maintenance_prompt(self, trace: ExecutionTrace) -> str:
         trace_head = self._runtime_builder.services.trace_store.read_trace_head(
             trace.trace_id,
             self._runtime_builder.services.settings.memory.maintenance_trace_head_chars,
         )
         return "\n".join(
             [
-                "Your mission is to harden Doron's durable memory after a completed mission.",
-                "Use memory tools to write, update, or deprecate durable memories, skills, and source packs.",
-                "Encourage good tool use and discourage wasteful repeated schema inspection, table recreation, and web source rediscovery.",
-                "You may inspect the graph for context, but only mutate durable memory records.",
+                "Your mission is to harden Doron's skills after a completed mission.",
+                "Use skill tools to write, update, or deprecate skills.",
+                "Encourage good tool use and discourage wasteful repeated web source rediscovery.",
+                "Only mutate skill records.",
                 f"Parent trace ID: {trace.trace_id}",
-                f"Parent trace head ({self._runtime_builder.services.settings.memory.maintenance_trace_head_chars} chars):",
+                f"Parent mission excerpt ({self._runtime_builder.services.settings.memory.maintenance_trace_head_chars} chars):",
                 trace_head,
-                "Use trace_grep to inspect other relevant parts of the full stored trace before making memory changes.",
-                "Return a concise plain-text summary of what memory changes you made.",
+                "Return a concise plain-text summary of what skill changes you made.",
             ]
         )
 

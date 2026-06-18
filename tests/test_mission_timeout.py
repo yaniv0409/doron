@@ -14,7 +14,7 @@ class HangingAgent:
 
 class FakeAgentFactory:
     def create(self, runtime):
-        return SimpleNamespace(runtime=runtime, agent=HangingAgent(), tool_names=["graph_read"])
+        return SimpleNamespace(runtime=runtime, agent=HangingAgent(), tool_names=["skill_search"])
 
 
 def test_mission_service_times_out_and_writes_progress(tmp_path: Path) -> None:

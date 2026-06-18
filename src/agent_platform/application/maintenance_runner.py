@@ -46,7 +46,7 @@ class MaintenanceRunner:
         if not self._settings.memory.maintenance_enabled:
             self._logger.info("maintenance job skipped; disabled", extra={"trace_id": parent_trace.trace_id})
             return None
-        request = self._mission_service.build_memory_maintenance_request(parent_trace)
+        request = self._mission_service.build_skill_maintenance_request(parent_trace)
         record = self._job_store.enqueue(parent_trace, request)
         self._logger.info(
             "maintenance job queued",

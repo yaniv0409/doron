@@ -39,9 +39,9 @@ def test_maintenance_job_store_writes_queue_artifacts(tmp_path: Path) -> None:
     job_store = MaintenanceJobStore(settings, trace_store)
     parent_trace = _build_parent_trace()
     request = MissionRequest(
-        prompt="maintain memory",
+        prompt="maintain skills",
         db_path="/tmp/demo.kuzu",
-        mission_metadata={"mission_kind": "memory_maintenance", "parent_trace_id": parent_trace.trace_id},
+        mission_metadata={"mission_kind": "skill_maintenance", "parent_trace_id": parent_trace.trace_id},
         web_enabled=False,
     )
 
@@ -50,7 +50,7 @@ def test_maintenance_job_store_writes_queue_artifacts(tmp_path: Path) -> None:
     loaded = job_store.read(record.trace_id)
     assert loaded is not None
     assert loaded.status == MaintenanceJobStatus.PENDING
-    assert json.loads((settings.directory / record.trace_id / "request.json").read_text(encoding="utf-8"))["prompt"] == "maintain memory"
+    assert json.loads((settings.directory / record.trace_id / "request.json").read_text(encoding="utf-8"))["prompt"] == "maintain skills"
     assert "status" in json.loads((settings.directory / record.trace_id / "trace.json").read_text(encoding="utf-8"))
 
 
@@ -64,9 +64,9 @@ def test_maintenance_runner_marks_cancelled_jobs(tmp_path: Path) -> None:
         parent_trace = _build_parent_trace()
         gate = asyncio.Event()
         request = MissionRequest(
-            prompt="maintain memory",
+            prompt="maintain skills",
             db_path="/tmp/demo.kuzu",
-            mission_metadata={"mission_kind": "memory_maintenance", "parent_trace_id": parent_trace.trace_id},
+            mission_metadata={"mission_kind": "skill_maintenance", "parent_trace_id": parent_trace.trace_id},
             web_enabled=False,
         )
 
@@ -83,7 +83,7 @@ def test_maintenance_runner_marks_cancelled_jobs(tmp_path: Path) -> None:
             )
 
         service = SimpleNamespace(
-            build_memory_maintenance_request=lambda trace: request,
+            build_skill_maintenance_request=lambda trace: request,
             run=fake_run,
         )
         runner = MaintenanceRunner(settings, service, job_store)
