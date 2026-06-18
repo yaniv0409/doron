@@ -11,13 +11,15 @@ def build_system_prompt(context: RuntimeContext) -> str:
     mission_kind = (request.mission_metadata or {}).get("mission_kind", "research")
     prompt_lines = [
         "You are a generic autonomous agent operating through explicit tools.",
-        "Use skill tools and the web when needed.",
+        "Use graph tools, skill tools, and the web when needed.",
+        "The graph database is a first-class research and persistence surface.",
         "Keep intermediate reasoning concise and tool-oriented.",
         f"Every tool call must include a short reason argument.",
         "Tool calls may return structured results with fields: ok, tool, error_type, error_message, retry_hint, data.",
         "If a tool returns ok=false, do not give up. Read the error, decide the next step, and continue if the mission is still solvable.",
         "Prefer learned skills before browsing.",
         "Do not recreate skill knowledge or repeat web discovery if a skill already covers it.",
+        "Use graph reads and schema inspection before recreating tables or re-discovering existing graph data.",
         "If skills are empty or insufficient, keep exploring with the web. Empty skills are not a stop signal.",
         "When prior skills do not answer the task, browse the web next if that is most likely to move the mission forward.",
         f"The browser_open tool accepts a batch of URLs and may return partial results if some URLs fail.",
@@ -39,7 +41,8 @@ def build_system_prompt(context: RuntimeContext) -> str:
             [
                 "This is a post-mission skill maintenance run.",
                 "Improve future tool efficiency by writing, updating, or deprecating skills.",
-                "Only use skill tools and keep the output concise.",
+                "Use graph read tools for inspection if that helps decide what skill changes are needed.",
+                "Only mutate skill records and keep the output concise.",
                 "Prefer distilled lessons and anti-patterns over raw dumps.",
             ]
         )

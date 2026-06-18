@@ -186,3 +186,4 @@ def test_skill_maintenance_prompt_uses_trace_head_not_full_trace(tmp_path: Path)
     assert "Parent trace ID: parent-trace" in prompt
     assert "0123456789ABCDEFGH" in prompt
     assert "harden Doron's skills" in prompt
+    assert "Use graph read tools to inspect existing graph state" in prompt

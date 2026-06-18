@@ -376,6 +376,7 @@ class MissionService:
             [
                 "Your mission is to harden Doron's skills after a completed mission.",
                 "Use skill tools to write, update, or deprecate skills.",
+                "Use graph read tools to inspect existing graph state when that helps decide what skill changes are needed.",
                 "Encourage good tool use and discourage wasteful repeated web source rediscovery.",
                 "Only mutate skill records.",
                 f"Parent trace ID: {trace.trace_id}",

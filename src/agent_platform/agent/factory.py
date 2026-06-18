@@ -11,6 +11,9 @@ from agent_platform.application.output_schema import build_output_type
 from agent_platform.application.runtime_builder import MissionRuntime
 from agent_platform.domain.exceptions import ConfigurationError, ModelSwitchRequested
 from agent_platform.domain.models import ToolResult
+from agent_platform.tools.db_tools import inspect_schema as run_inspect_schema
+from agent_platform.tools.db_tools import read_graph as run_read_graph
+from agent_platform.tools.db_tools import write_graph as run_write_graph
 from agent_platform.tools.compression_tools import compress_context
 from agent_platform.tools.memory_tools import (
     skill_deprecate as run_skill_deprecate,
@@ -76,49 +79,118 @@ class AgentFactory:
                 result = await run_skill_search(ctx.deps, query, reason)
                 self._emit_tool_completed(ctx.deps, "skill_search", arguments, result)
                 return result
+
             tool_names.append("skill_search")
 
-            if is_skill_maintenance:
-                @agent.tool
-                async def skill_read(ctx: RunContext[MissionRuntime], ids: list[str], reason: str) -> ToolResult:
-                    arguments = {"ids": ids, "reason": reason}
-                    self._emit_tool_started(ctx.deps, "skill_read", arguments)
-                    result = await run_skill_read(ctx.deps, ids, reason)
-                    self._emit_tool_completed(ctx.deps, "skill_read", arguments, result)
-                    return result
-                tool_names.append("skill_read")
+        if not is_skill_maintenance:
+            @agent.tool
+            async def read_graph(
+                ctx: RunContext[MissionRuntime],
+                query: str,
+                reason: str,
+                parameters: dict[str, Any] | None = None,
+            ) -> ToolResult:
+                arguments = {"query": query, "parameters": parameters or {}, "reason": reason}
+                self._emit_tool_started(ctx.deps, "read_graph", arguments)
+                result = await run_read_graph(ctx.deps, query, reason, parameters)
+                self._emit_tool_completed(ctx.deps, "read_graph", arguments, result)
+                return result
 
-                @agent.tool
-                async def skill_write(ctx: RunContext[MissionRuntime], entries: list[dict[str, Any]], reason: str) -> ToolResult:
-                    arguments = {"entry_count": len(entries), "reason": reason}
-                    self._emit_tool_started(ctx.deps, "skill_write", arguments)
-                    result = await run_skill_write(ctx.deps, entries, reason)
-                    self._emit_tool_completed(ctx.deps, "skill_write", arguments, result)
-                    return result
-                tool_names.append("skill_write")
+            tool_names.append("read_graph")
 
-                @agent.tool
-                async def skill_update(ctx: RunContext[MissionRuntime], entries: list[dict[str, Any]], reason: str) -> ToolResult:
-                    arguments = {"entry_count": len(entries), "reason": reason}
-                    self._emit_tool_started(ctx.deps, "skill_update", arguments)
-                    result = await run_skill_update(ctx.deps, entries, reason)
-                    self._emit_tool_completed(ctx.deps, "skill_update", arguments, result)
-                    return result
-                tool_names.append("skill_update")
+            @agent.tool
+            async def write_graph(
+                ctx: RunContext[MissionRuntime],
+                query: str,
+                reason: str,
+                parameters: dict[str, Any] | None = None,
+            ) -> ToolResult:
+                if not ctx.deps.context.mission_request.db_mutation_enabled:
+                    raise ConfigurationError("graph mutations are disabled for this mission")
+                arguments = {"query": query, "parameters": parameters or {}, "reason": reason}
+                self._emit_tool_started(ctx.deps, "write_graph", arguments)
+                result = await run_write_graph(ctx.deps, query, reason, parameters)
+                self._emit_tool_completed(ctx.deps, "write_graph", arguments, result)
+                return result
 
-                @agent.tool
-                async def skill_deprecate(
-                    ctx: RunContext[MissionRuntime],
-                    ids: list[str],
-                    reason: str,
-                    replacement_id: str | None = None,
-                ) -> ToolResult:
-                    arguments = {"ids": ids, "replacement_id": replacement_id, "reason": reason}
-                    self._emit_tool_started(ctx.deps, "skill_deprecate", arguments)
-                    result = await run_skill_deprecate(ctx.deps, ids, reason, replacement_id)
-                    self._emit_tool_completed(ctx.deps, "skill_deprecate", arguments, result)
-                    return result
-                tool_names.append("skill_deprecate")
+            tool_names.append("write_graph")
+
+            @agent.tool
+            async def inspect_schema(ctx: RunContext[MissionRuntime], reason: str) -> ToolResult:
+                arguments = {"reason": reason}
+                self._emit_tool_started(ctx.deps, "inspect_schema", arguments)
+                result = await run_inspect_schema(ctx.deps, reason)
+                self._emit_tool_completed(ctx.deps, "inspect_schema", arguments, result)
+                return result
+
+            tool_names.append("inspect_schema")
+
+        if is_skill_maintenance:
+            @agent.tool
+            async def read_graph(
+                ctx: RunContext[MissionRuntime],
+                query: str,
+                reason: str,
+                parameters: dict[str, Any] | None = None,
+            ) -> ToolResult:
+                arguments = {"query": query, "parameters": parameters or {}, "reason": reason}
+                self._emit_tool_started(ctx.deps, "read_graph", arguments)
+                result = await run_read_graph(ctx.deps, query, reason, parameters)
+                self._emit_tool_completed(ctx.deps, "read_graph", arguments, result)
+                return result
+
+            tool_names.append("read_graph")
+
+            @agent.tool
+            async def inspect_schema(ctx: RunContext[MissionRuntime], reason: str) -> ToolResult:
+                arguments = {"reason": reason}
+                self._emit_tool_started(ctx.deps, "inspect_schema", arguments)
+                result = await run_inspect_schema(ctx.deps, reason)
+                self._emit_tool_completed(ctx.deps, "inspect_schema", arguments, result)
+                return result
+
+            tool_names.append("inspect_schema")
+
+            @agent.tool
+            async def skill_read(ctx: RunContext[MissionRuntime], ids: list[str], reason: str) -> ToolResult:
+                arguments = {"ids": ids, "reason": reason}
+                self._emit_tool_started(ctx.deps, "skill_read", arguments)
+                result = await run_skill_read(ctx.deps, ids, reason)
+                self._emit_tool_completed(ctx.deps, "skill_read", arguments, result)
+                return result
+            tool_names.append("skill_read")
+
+            @agent.tool
+            async def skill_write(ctx: RunContext[MissionRuntime], entries: list[dict[str, Any]], reason: str) -> ToolResult:
+                arguments = {"entry_count": len(entries), "reason": reason}
+                self._emit_tool_started(ctx.deps, "skill_write", arguments)
+                result = await run_skill_write(ctx.deps, entries, reason)
+                self._emit_tool_completed(ctx.deps, "skill_write", arguments, result)
+                return result
+            tool_names.append("skill_write")
+
+            @agent.tool
+            async def skill_update(ctx: RunContext[MissionRuntime], entries: list[dict[str, Any]], reason: str) -> ToolResult:
+                arguments = {"entry_count": len(entries), "reason": reason}
+                self._emit_tool_started(ctx.deps, "skill_update", arguments)
+                result = await run_skill_update(ctx.deps, entries, reason)
+                self._emit_tool_completed(ctx.deps, "skill_update", arguments, result)
+                return result
+            tool_names.append("skill_update")
+
+            @agent.tool
+            async def skill_deprecate(
+                ctx: RunContext[MissionRuntime],
+                ids: list[str],
+                reason: str,
+                replacement_id: str | None = None,
+            ) -> ToolResult:
+                arguments = {"ids": ids, "replacement_id": replacement_id, "reason": reason}
+                self._emit_tool_started(ctx.deps, "skill_deprecate", arguments)
+                result = await run_skill_deprecate(ctx.deps, ids, reason, replacement_id)
+                self._emit_tool_completed(ctx.deps, "skill_deprecate", arguments, result)
+                return result
+            tool_names.append("skill_deprecate")
 
         if not runtime.services.settings.debug.disable_browser_tools and not is_skill_maintenance:
             @agent.tool

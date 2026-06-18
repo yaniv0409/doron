@@ -168,8 +168,58 @@ def test_agent_factory_registers_skill_tools_for_maintenance_only() -> None:
     assert "skill_write" in session.tool_names
     assert "skill_update" in session.tool_names
     assert "skill_deprecate" in session.tool_names
+    assert "read_graph" in session.tool_names
+    assert "inspect_schema" in session.tool_names
     assert "browser_open" not in session.tool_names
     assert "browser_text" not in session.tool_names
+
+
+def test_agent_factory_registers_graph_tools_for_research_mission() -> None:
+    settings = AppSettings()
+    settings.openrouter.api_key = "test-key"
+    runtime = _build_runtime_wrapper(
+        MissionRequest(
+            prompt="research",
+            db_path="/tmp/db.kuzu",
+            web_enabled=False,
+        ),
+        settings,
+    )
+
+    class FakeProvider:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+    class FakeModel:
+        def __init__(self, name, provider) -> None:
+            self.name = name
+            self.provider = provider
+
+    class FakeAgent:
+        def __init__(self, model, **kwargs) -> None:
+            self.model = model
+            self.kwargs = kwargs
+
+        def tool(self, fn):
+            return fn
+
+    original_agent = factory_module.Agent
+    original_model = factory_module.OpenRouterModel
+    original_provider = factory_module.OpenRouterProvider
+    try:
+        factory_module.Agent = FakeAgent
+        factory_module.OpenRouterModel = FakeModel
+        factory_module.OpenRouterProvider = FakeProvider
+        session = AgentFactory().create(runtime)
+    finally:
+        factory_module.Agent = original_agent
+        factory_module.OpenRouterModel = original_model
+        factory_module.OpenRouterProvider = original_provider
+
+    assert "read_graph" in session.tool_names
+    assert "write_graph" in session.tool_names
+    assert "inspect_schema" in session.tool_names
+    assert "skill_search" in session.tool_names
 
 
 def test_switch_model_tool_schema_matches_allowed_models() -> None:
