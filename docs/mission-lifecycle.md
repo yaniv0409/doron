@@ -30,6 +30,7 @@ Context compression never replaces the original mission prompt. The mission prom
 Browser navigation uses a dedicated 15-second timeout by default. Browser timeouts are returned as recoverable tool errors, and browser-stage progress is written during navigation so a stuck page can be distinguished from a stalled model call.
 Every tool call must include a short reason, and browser tools are capped at 20 calls per mission by default. That reason and the remaining web budget are surfaced in tool results and handoff prompts so the model keeps its direction and can stop browsing before it is rate limited.
 Skill maintenance is durable and repo-owned. A main mission that finishes with maintenance enabled writes a maintenance job record under `traces/maintenance-jobs/`, writes an initial maintenance trace skeleton immediately, and lets the `MaintenanceRunner` execute the follow-up in the background. On startup the runner reloads pending jobs so maintenance does not depend on the request lifecycle that triggered the mission.
+When the CLI auto-starts the local API server, `MissionApiClient.close()` no longer tears that server down. The server stays up so background maintenance can finish; explicit server shutdown is a separate action.
 When the API is called with `stream=true`, the same mission emits live SSE events for mission progress, tool starts/completions, and the final result.
 
 ## Completion

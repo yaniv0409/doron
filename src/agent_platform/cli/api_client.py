@@ -26,6 +26,11 @@ class MissionApiClient:
         self._server_process: subprocess.Popen[str] | None = None
 
     def close(self) -> None:
+        # Keep auto-started servers alive so background maintenance can finish.
+        if self._server_process is not None and self._server_process.poll() is not None:
+            self._server_process = None
+
+    def shutdown_server(self) -> None:
         if self._server_process is not None and self._server_process.poll() is None:
             self._server_process.terminate()
             try:
