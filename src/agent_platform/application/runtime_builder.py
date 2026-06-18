@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
+from agent_platform.application.memory_manager import MemoryManager
 from agent_platform.config.settings import AppSettings
 from agent_platform.application.context_compression import ContextCompressor
 from agent_platform.application.live_events import emit_runtime_event
@@ -24,6 +25,7 @@ class RuntimeServices:
     embedding_client: OpenRouterEmbeddingClient
     chat_client: OpenRouterChatClient
     context_compressor: ContextCompressor
+    memory_manager: MemoryManager
 
 
 @dataclass(slots=True)
@@ -36,14 +38,16 @@ class MissionRuntime:
 
 class RuntimeBuilder:
     def __init__(self, settings: AppSettings) -> None:
+        embedding_client = OpenRouterEmbeddingClient(settings.openrouter)
         self._services = RuntimeServices(
             settings=settings,
             model_catalog=ModelCatalog(settings),
             trace_store=TraceStore(settings.traces),
             docs_repository=DocumentationRepository(settings.docs),
-            embedding_client=OpenRouterEmbeddingClient(settings.openrouter),
+            embedding_client=embedding_client,
             chat_client=OpenRouterChatClient(settings.openrouter),
             context_compressor=ContextCompressor(settings.compression),
+            memory_manager=MemoryManager(settings.memory, embedding_client),
         )
 
     def build(self, request: MissionRequest) -> MissionRuntime:

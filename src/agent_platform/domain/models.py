@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from agent_platform.domain.enums import MissionStatus, ResultFormat
+from agent_platform.domain.enums import MaintenanceJobStatus, MissionStatus, ResultFormat
 
 
 def utc_now() -> datetime:
@@ -39,6 +39,18 @@ class MissionResult(BaseModel):
     started_at: datetime
     completed_at: datetime
     error: MissionError | None = None
+
+
+class MaintenanceJobRecord(BaseModel):
+    trace_id: str
+    parent_trace_id: str
+    request: MissionRequest
+    status: MaintenanceJobStatus = MaintenanceJobStatus.PENDING
+    attempt_count: int = 0
+    created_at: datetime = Field(default_factory=utc_now)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    last_error: MissionError | None = None
 
 
 class ModelDescriptor(BaseModel):
@@ -127,6 +139,40 @@ class DocumentationLookupRecord(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
 
 
+class DurableMemoryRecord(BaseModel):
+    id: str
+    kind: str
+    title: str
+    body: str
+    tags: list[str] = Field(default_factory=list)
+    confidence: float = 0.5
+    status: str = "active"
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    embedding_json: str | None = None
+    score: float | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    last_used_at: datetime | None = None
+
+
+class MemoryRetrievalRecord(BaseModel):
+    query: str
+    kinds: list[str] = Field(default_factory=list)
+    results: list[DurableMemoryRecord] = Field(default_factory=list)
+    source: str = "runtime"
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class MemoryMutationRecord(BaseModel):
+    action: str
+    memory_id: str
+    kind: str
+    title: str
+    reason: str
+    status: str = "active"
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class CompressionEvent(BaseModel):
     trigger: str
     summarizer_model: str
@@ -151,7 +197,21 @@ class ContextTransferPacket(BaseModel):
     db_findings: list[str] = Field(default_factory=list)
     web_findings: list[str] = Field(default_factory=list)
     tool_summaries: list[str] = Field(default_factory=list)
+    worked_tool_patterns: list[str] = Field(default_factory=list)
+    failed_tool_patterns: list[str] = Field(default_factory=list)
     notice: str | None = None
+
+
+class CompressedToolOutcome(BaseModel):
+    tool: str
+    status: str
+    reason: str | None = None
+    arguments_summary: str | None = None
+    result_summary: str | None = None
+    error_type: str | None = None
+    error_message: str | None = None
+    retry_guidance: str | None = None
+    repeat: bool = False
 
 
 class CompressedMemory(BaseModel):
@@ -159,6 +219,7 @@ class CompressedMemory(BaseModel):
     db_findings: list[str] = Field(default_factory=list)
     web_findings: list[str] = Field(default_factory=list)
     tool_summaries: list[str] = Field(default_factory=list)
+    tool_outcomes: list[CompressedToolOutcome] = Field(default_factory=list)
     unresolved_goals: list[str] = Field(default_factory=list)
     notice: str | None = None
 
@@ -174,6 +235,11 @@ class RuntimeContext:
     db_findings: list[str] = field(default_factory=list)
     web_findings: list[str] = field(default_factory=list)
     web_artifacts: list[WebArtifact] = field(default_factory=list)
+    durable_memories: list[DurableMemoryRecord] = field(default_factory=list)
+    retrieved_skills: list[DurableMemoryRecord] = field(default_factory=list)
+    retrieved_source_packs: list[DurableMemoryRecord] = field(default_factory=list)
+    memory_retrievals: list[MemoryRetrievalRecord] = field(default_factory=list)
+    memory_mutations: list[MemoryMutationRecord] = field(default_factory=list)
     tool_summaries: list[str] = field(default_factory=list)
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
     db_mutations: list[DbMutationRecord] = field(default_factory=list)
@@ -188,6 +254,8 @@ class RuntimeContext:
     compression_in_progress: bool = False
     last_compression_size: int = 0
     pending_model_switch: str | None = None
+    memory_tool_calls_used: int = 0
+    memory_tool_call_budget: int | None = None
     browser_session_started: bool = False
     db_checkpoint_path: str | None = None
     progress_hook: Any | None = None
@@ -207,6 +275,8 @@ class RuntimeContext:
                 db_findings=self.compressed_memory.db_findings,
                 web_findings=self.compressed_memory.web_findings,
                 tool_summaries=self._build_tool_summary_block(),
+                worked_tool_patterns=self._build_tool_pattern_block("worked"),
+                failed_tool_patterns=self._build_tool_pattern_block("failed"),
                 notice=self.compression_notice,
             )
         return ContextTransferPacket(
@@ -215,12 +285,15 @@ class RuntimeContext:
             db_findings=self.db_findings[-20:],
             web_findings=self.web_findings[-20:],
             tool_summaries=self._build_tool_summary_block(),
+            worked_tool_patterns=[],
+            failed_tool_patterns=[],
             notice=self.compression_notice,
         )
 
     def estimate_working_memory_size(self) -> int:
         parts = [
             self.mission_request.prompt,
+            self.build_learned_context_block(),
             "\n".join(self.reasoning_notes),
             "\n".join(self.db_findings),
             "\n".join(self.web_findings),
@@ -233,6 +306,8 @@ class RuntimeContext:
                     "\n".join(self.compressed_memory.db_findings),
                     "\n".join(self.compressed_memory.web_findings),
                     "\n".join(self.compressed_memory.tool_summaries),
+                    "\n".join(self._build_tool_pattern_block("worked")),
+                    "\n".join(self._build_tool_pattern_block("failed")),
                     "\n".join(self.compressed_memory.unresolved_goals),
                 ]
             )
@@ -247,6 +322,43 @@ class RuntimeContext:
             summaries.append(self.compression_notice)
         return summaries
 
+    def _build_tool_pattern_block(self, status: str) -> list[str]:
+        if self.compressed_memory is None:
+            return []
+        items: list[str] = []
+        for item in self.compressed_memory.tool_outcomes:
+            if item.status != status:
+                continue
+            parts = [item.tool]
+            if item.arguments_summary:
+                parts.append(item.arguments_summary)
+            if item.result_summary:
+                parts.append(item.result_summary)
+            elif item.error_message:
+                parts.append(item.error_message)
+            if item.retry_guidance:
+                parts.append(item.retry_guidance)
+            items.append(" | ".join(part for part in parts if part)[:400])
+        return items
+
+    def build_learned_context_block(self) -> str:
+        groups = [
+            ("Relevant skills", self.retrieved_skills),
+            ("Known source packs", self.retrieved_source_packs),
+            ("Relevant memories", self.durable_memories),
+        ]
+        lines: list[str] = []
+        for label, records in groups:
+            if not records:
+                continue
+            lines.append(f"{label}:")
+            for item in records:
+                summary = f"- [{item.kind}] {item.title}: {item.body}"
+                if item.tags:
+                    summary += f" | tags: {', '.join(item.tags[:5])}"
+                lines.append(summary[:500])
+        return "\n".join(lines)
+
 
 class ExecutionTrace(BaseModel):
     trace_id: str
@@ -256,6 +368,8 @@ class ExecutionTrace(BaseModel):
     db_mutations: list[DbMutationRecord]
     docs_lookups: list[DocumentationLookupRecord]
     web_artifacts: list[WebArtifact]
+    memory_retrievals: list[MemoryRetrievalRecord] = Field(default_factory=list)
+    memory_mutations: list[MemoryMutationRecord] = Field(default_factory=list)
     compression_events: list[CompressionEvent]
     runtime_events: list[RuntimeEvent]
     result: Any = None

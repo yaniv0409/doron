@@ -20,6 +20,8 @@ class FakeAgentFactory:
 def test_mission_service_times_out_and_writes_progress(tmp_path: Path) -> None:
     settings = AppSettings()
     settings.runtime.agent_run_timeout_seconds = 1
+    settings.memory.enabled = False
+    settings.memory.maintenance_enabled = False
     settings.traces.directory = tmp_path / "traces"
     settings.traces.checkpoint_directory = tmp_path / "checkpoints"
     service = MissionService(settings)

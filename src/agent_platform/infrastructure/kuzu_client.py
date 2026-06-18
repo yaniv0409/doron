@@ -38,6 +38,16 @@ class KuzuGateway:
     def show_tables(self) -> list[dict[str, Any]]:
         return self.execute("CALL show_tables() RETURN *;")
 
+    def table_names(self) -> list[str]:
+        names: list[str] = []
+        for row in self.show_tables():
+            for key in ("name", "table name", "table_name"):
+                value = row.get(key)
+                if isinstance(value, str):
+                    names.append(value)
+                    break
+        return names
+
     def table_info(self, table_name: str) -> list[dict[str, Any]]:
         return self.execute(f"CALL table_info('{table_name}') RETURN *;")
 

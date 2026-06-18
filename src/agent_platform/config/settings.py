@@ -72,6 +72,21 @@ class CompressionSettings(BaseModel):
     timeout_seconds: int = 60
 
 
+class MemorySettings(BaseModel):
+    enabled: bool = True
+    preflight_limit: int = 8
+    search_candidate_limit: int = 50
+    learned_context_max_items: int = 12
+    learned_context_max_chars: int = 4_000
+    maintenance_enabled: bool = True
+    maintenance_tool_budget: int = 20
+    maintenance_related_memory_limit: int = 24
+    maintenance_trace_head_chars: int = 4_000
+    maintenance_trace_grep_radius_lines: int = 8
+    maintenance_trace_grep_max_matches: int = 8
+    maintenance_trace_grep_max_lines: int = 160
+
+
 class RuntimeSettings(BaseModel):
     agent_run_timeout_seconds: int = 3600
 
@@ -90,6 +105,7 @@ class AppSettings(BaseModel):
     browser: BrowserSettings = Field(default_factory=BrowserSettings)
     docs: DocumentationSettings = Field(default_factory=DocumentationSettings)
     compression: CompressionSettings = Field(default_factory=CompressionSettings)
+    memory: MemorySettings = Field(default_factory=MemorySettings)
     runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
     debug: DebugSettings = Field(default_factory=DebugSettings)
     models: list[ModelSettings] = Field(

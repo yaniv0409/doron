@@ -6,6 +6,14 @@ class MissionStatus(str, Enum):
     FAILED = "failed"
 
 
+class MaintenanceJobStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 class ResultFormat(str, Enum):
     JSON_SCHEMA = "json_schema"
     TEXT = "text"

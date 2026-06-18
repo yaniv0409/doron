@@ -11,7 +11,7 @@ from agent_platform.application.runtime_builder import MissionRuntime, RuntimeBu
 from agent_platform.config.settings import AppSettings
 from agent_platform.domain.enums import LogCategory, MissionStatus, ResultFormat
 from agent_platform.domain.exceptions import AgentPlatformError, ContextRefreshRequested, ModelSwitchRequested, OutputValidationError
-from agent_platform.domain.models import ExecutionTrace, MissionError, MissionRequest, MissionResult, utc_now
+from agent_platform.domain.models import ExecutionTrace, MemoryRetrievalRecord, MissionError, MissionRequest, MissionResult, utc_now
 from agent_platform.infrastructure.logging import get_logger
 
 
@@ -25,21 +25,33 @@ class MissionService:
         self._db_logger = get_logger(LogCategory.DB_AUDIT.value)
         self._docs_logger = get_logger(LogCategory.DOCS_AUDIT.value)
         self._web_logger = get_logger(LogCategory.WEB_AUDIT.value)
+        self._maintenance_runner: Any | None = None
+
+    @property
+    def trace_store(self):
+        return self._runtime_builder.services.trace_store
+
+    def attach_maintenance_runner(self, runner: Any) -> None:
+        self._maintenance_runner = runner
 
     async def run(self, request: MissionRequest, *, event_hook: Any | None = None) -> MissionResult:
         runtime = self._runtime_builder.build(request)
+        self._prepare_runtime(runtime)
         runtime.context.progress_hook = lambda **kwargs: self._write_progress(runtime, **kwargs)
         runtime.context.event_hook = event_hook
-        self._runtime_builder.services.trace_store.write_request_snapshot(
+        await self._load_durable_memory(runtime)
+        request_payload = request.model_dump(mode="json")
+        runtime.services.trace_store.write_request_snapshot(
             runtime.context.trace_id,
-            request.model_dump(mode="json"),
+            request_payload,
         )
+        self._write_trace_skeleton(runtime, request_payload)
         emit_stream_event(
             runtime.context,
             "mission.started",
             {
                 "trace_id": runtime.context.trace_id,
-                "request": request.model_dump(mode="json"),
+                "request": request_payload,
                 "model": runtime.context.current_model.name,
             },
         )
@@ -133,7 +145,8 @@ class MissionService:
                     started_at=runtime.context.started_at,
                     completed_at=completed_at,
                 )
-                self._persist_trace(runtime, model_sequence, mission_result, None)
+                trace = self._persist_trace(runtime, model_sequence, mission_result, None)
+                self._maybe_schedule_memory_maintenance(trace)
                 await runtime.browser.close()
                 return mission_result
         except asyncio.TimeoutError:
@@ -209,23 +222,26 @@ class MissionService:
         model_sequence: list[str],
         result: MissionResult | None,
         error: MissionError | None,
-    ) -> None:
+    ) -> ExecutionTrace:
         trace = ExecutionTrace(
             trace_id=runtime.context.trace_id,
             request=runtime.context.mission_request,
             model_sequence=model_sequence,
-            tool_calls=runtime.context.tool_calls,
-            db_mutations=runtime.context.db_mutations,
-            docs_lookups=runtime.context.docs_lookups,
-            web_artifacts=runtime.context.web_artifacts,
-            compression_events=runtime.context.compression_events,
-            runtime_events=runtime.context.runtime_events,
+            tool_calls=getattr(runtime.context, "tool_calls", []),
+            db_mutations=getattr(runtime.context, "db_mutations", []),
+            docs_lookups=getattr(runtime.context, "docs_lookups", []),
+            web_artifacts=getattr(runtime.context, "web_artifacts", []),
+            memory_retrievals=getattr(runtime.context, "memory_retrievals", []),
+            memory_mutations=getattr(runtime.context, "memory_mutations", []),
+            compression_events=getattr(runtime.context, "compression_events", []),
+            runtime_events=getattr(runtime.context, "runtime_events", []),
             result=result.result if result else None,
             error=error,
             started_at=runtime.context.started_at,
             completed_at=result.completed_at if result else utc_now(),
         )
-        self._runtime_builder.services.trace_store.write_trace(trace)
+        runtime.services.trace_store.write_trace(trace)
+        return trace
 
     async def _fail(
         self,
@@ -250,11 +266,127 @@ class MissionService:
             completed_at=completed_at,
             error=error,
         )
-        self._persist_trace(runtime, model_sequence, result, error)
+        trace = self._persist_trace(runtime, model_sequence, result, error)
         self._append_runtime_event(runtime, "failed", message, {"code": code})
+        self._maybe_schedule_memory_maintenance(trace)
         await runtime.browser.close()
         self._logger.error(message, extra={"trace_id": runtime.context.trace_id})
         return result
+
+    def _prepare_runtime(self, runtime: MissionRuntime) -> None:
+        metadata = runtime.context.mission_request.mission_metadata or {}
+        if metadata.get("mission_kind") == "memory_maintenance":
+            runtime.context.memory_tool_call_budget = runtime.services.settings.memory.maintenance_tool_budget
+            runtime.services.memory_manager.ensure_schema(runtime.db)
+
+    def _write_trace_skeleton(self, runtime: MissionRuntime, request_payload: dict[str, Any]) -> None:
+        metadata = runtime.context.mission_request.mission_metadata or {}
+        if metadata.get("mission_kind") != "memory_maintenance":
+            return
+        parent_trace_id = metadata.get("parent_trace_id")
+        parent_trace_path = None
+        if isinstance(parent_trace_id, str) and parent_trace_id:
+            parent_trace_path = str(runtime.services.trace_store.trace_path(parent_trace_id))
+        runtime.services.trace_store.write_trace_skeleton(
+            runtime.context.trace_id,
+            {
+                "trace_id": runtime.context.trace_id,
+                "status": "started",
+                "mission_kind": "memory_maintenance",
+                "parent_trace_id": parent_trace_id,
+                "parent_trace_path": parent_trace_path,
+                "request": request_payload,
+                "model_sequence": [runtime.context.current_model.name],
+                "started_at": runtime.context.started_at.isoformat(),
+                "runtime_events": [],
+            },
+        )
+
+    async def _load_durable_memory(self, runtime: MissionRuntime) -> None:
+        if not runtime.services.settings.memory.enabled:
+            return
+        metadata = runtime.context.mission_request.mission_metadata or {}
+        if metadata.get("mission_kind") == "memory_maintenance":
+            parent_trace_id = metadata.get("parent_trace_id")
+            if isinstance(parent_trace_id, str) and parent_trace_id:
+                trace_text = runtime.services.trace_store.read_raw_trace_text(parent_trace_id)
+                results = await runtime.services.memory_manager.related_for_maintenance(
+                    runtime.db,
+                    trace_text,
+                )
+                runtime.context.memory_retrievals.append(
+                    MemoryRetrievalRecord(
+                        query=parent_trace_id,
+                        kinds=[],
+                        results=results,
+                        source="maintenance_preflight",
+                    )
+                )
+                runtime.context.durable_memories = [item for item in results if item.kind == "memory"]
+                runtime.context.retrieved_skills = [item for item in results if item.kind == "skill"]
+                runtime.context.retrieved_source_packs = [item for item in results if item.kind == "source_pack"]
+            return
+        await runtime.services.memory_manager.preflight(runtime)
+
+    def _maybe_schedule_memory_maintenance(self, trace: ExecutionTrace) -> None:
+        if trace is None:
+            return
+        metadata = trace.request.mission_metadata or {}
+        if metadata.get("mission_kind") == "memory_maintenance":
+            return
+        if not self._runtime_builder.services.settings.memory.maintenance_enabled:
+            return
+        if self._maintenance_runner is None:
+            self._logger.info("maintenance runner unavailable; job not enqueued", extra={"trace_id": trace.trace_id})
+            return
+        self._maintenance_runner.enqueue(trace)
+
+    def build_memory_maintenance_request(self, trace: ExecutionTrace) -> MissionRequest:
+        strongest = self._runtime_builder.services.model_catalog.strongest_allowed(
+            self._runtime_builder.services.model_catalog.resolve_allowed(trace.request)
+        )
+        return MissionRequest(
+            prompt=self._build_memory_maintenance_prompt(trace),
+            db_path=trace.request.db_path,
+            preferred_model=strongest.name,
+            allowed_models=[item.name for item in self._runtime_builder.services.model_catalog.resolve_allowed(trace.request)],
+            mission_metadata={
+                "mission_kind": "memory_maintenance",
+                "parent_trace_id": trace.trace_id,
+            },
+            web_enabled=False,
+            db_mutation_enabled=True,
+        )
+
+    async def _run_memory_maintenance(self, trace: ExecutionTrace) -> None:
+        request = self.build_memory_maintenance_request(trace)
+        try:
+            await self.run(request)
+        except Exception as exc:  # pragma: no cover
+            self._logger.error(
+                "memory maintenance failed: %s",
+                exc,
+                extra={"trace_id": trace.trace_id},
+            )
+
+    def _build_memory_maintenance_prompt(self, trace: ExecutionTrace) -> str:
+        trace_head = self._runtime_builder.services.trace_store.read_trace_head(
+            trace.trace_id,
+            self._runtime_builder.services.settings.memory.maintenance_trace_head_chars,
+        )
+        return "\n".join(
+            [
+                "Your mission is to harden Doron's durable memory after a completed mission.",
+                "Use memory tools to write, update, or deprecate durable memories, skills, and source packs.",
+                "Encourage good tool use and discourage wasteful repeated schema inspection, table recreation, and web source rediscovery.",
+                "You may inspect the graph for context, but only mutate durable memory records.",
+                f"Parent trace ID: {trace.trace_id}",
+                f"Parent trace head ({self._runtime_builder.services.settings.memory.maintenance_trace_head_chars} chars):",
+                trace_head,
+                "Use trace_grep to inspect other relevant parts of the full stored trace before making memory changes.",
+                "Return a concise plain-text summary of what memory changes you made.",
+            ]
+        )
 
     def _log_runtime_state(self, runtime: MissionRuntime) -> None:
         extra = {"trace_id": runtime.context.trace_id}
@@ -286,7 +418,7 @@ class MissionService:
         message: str,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        self._runtime_builder.services.trace_store.write_progress(
+        runtime.services.trace_store.write_progress(
             runtime.context.trace_id,
             {
                 "trace_id": runtime.context.trace_id,

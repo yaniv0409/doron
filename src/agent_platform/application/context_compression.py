@@ -134,11 +134,37 @@ class ContextCompressor:
                         "db_findings": ["important database fact"],
                         "web_findings": ["important web fact"],
                         "tool_summaries": ["tool outcome summary"],
+                        "tool_outcomes": [
+                            {
+                                "tool": "graph_read",
+                                "status": "worked",
+                                "reason": "reuse known-good query",
+                                "arguments_summary": "query=MATCH (c:Company) RETURN c.ticker, c.name",
+                                "result_summary": "returned 23 rows",
+                                "error_type": None,
+                                "error_message": None,
+                                "retry_guidance": "repeat this query shape if company basics are needed",
+                                "repeat": True,
+                            },
+                            {
+                                "tool": "graph_read",
+                                "status": "failed",
+                                "reason": "avoid repeating bad query",
+                                "arguments_summary": "query=MATCH (c:Company) RETURN properties(c)",
+                                "result_summary": "Kuzu rejected PROPERTIES on NODE",
+                                "error_type": "database_missing_object",
+                                "error_message": "Function PROPERTIES did not receive correct arguments",
+                                "retry_guidance": "do not retry unchanged; use explicit properties instead",
+                                "repeat": False,
+                            },
+                        ],
                         "unresolved_goals": ["open problem or next action"],
                         "notice": "short notice for the next agent turn",
                     }
                 ),
-                "Keep only high-signal facts, failures, unresolved goals, and next useful actions.",
+                "Keep only high-signal facts, failures, unresolved goals, next useful actions, and tool patterns worth repeating or avoiding.",
+                "For tool_outcomes, preserve which tools worked, which failed, the important arguments or parameters, and why they should or should not be repeated.",
+                "Include concrete query, URL, or parameter summaries when they caused success or failure.",
                 "Remove repetition and low-value scratch reasoning.",
             ]
         )
@@ -162,6 +188,8 @@ class ContextCompressor:
             "recent_tool_calls": [
                 {
                     "name": item.name,
+                    "arguments": item.arguments,
+                    "reason": item.reason,
                     "ok": item.ok,
                     "result_summary": item.result_summary,
                     "error_type": item.error_type,

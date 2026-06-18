@@ -118,6 +118,56 @@ def test_agent_factory_passes_structured_output_type() -> None:
     assert validated.model_dump(mode="json") == {"answer": "ok"}
 
 
+def test_agent_factory_registers_trace_tools_for_memory_maintenance_only() -> None:
+    settings = AppSettings()
+    settings.openrouter.api_key = "test-key"
+    runtime = _build_runtime_wrapper(
+        MissionRequest(
+            prompt="maintain",
+            db_path="/tmp/db.kuzu",
+            mission_metadata={"mission_kind": "memory_maintenance", "parent_trace_id": "trace-parent"},
+            web_enabled=False,
+        ),
+        settings,
+    )
+
+    class FakeProvider:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+    class FakeModel:
+        def __init__(self, name, provider) -> None:
+            self.name = name
+            self.provider = provider
+
+    class FakeAgent:
+        def __init__(self, model, **kwargs) -> None:
+            self.model = model
+            self.kwargs = kwargs
+
+        def tool(self, fn):
+            return fn
+
+    original_agent = factory_module.Agent
+    original_model = factory_module.OpenRouterModel
+    original_provider = factory_module.OpenRouterProvider
+    try:
+        factory_module.Agent = FakeAgent
+        factory_module.OpenRouterModel = FakeModel
+        factory_module.OpenRouterProvider = FakeProvider
+        session = AgentFactory().create(runtime)
+    finally:
+        factory_module.Agent = original_agent
+        factory_module.OpenRouterModel = original_model
+        factory_module.OpenRouterProvider = original_provider
+
+    assert "trace_head" in session.tool_names
+    assert "trace_grep" in session.tool_names
+    assert "memory_write" in session.tool_names
+    assert "browser_open" not in session.tool_names
+    assert "browser_text" not in session.tool_names
+
+
 def test_prompt_builders_keep_structured_output_hint_after_refresh() -> None:
     schema = {
         "type": "object",
@@ -145,6 +195,7 @@ def test_mission_service_repairs_invalid_json_then_returns_structured_result() -
         "additionalProperties": False,
     }
     settings = AppSettings()
+    settings.memory.enabled = False
     service = MissionService(settings)
 
     class FakeTraceStore:
@@ -158,6 +209,7 @@ def test_mission_service_repairs_invalid_json_then_returns_structured_result() -
         settings=settings,
         trace_store=FakeTraceStore(),
         model_catalog=SimpleNamespace(next_stronger=lambda *args, **kwargs: None),
+        memory_manager=SimpleNamespace(preflight=lambda *args, **kwargs: None),
     )
 
     prompts: list[str] = []

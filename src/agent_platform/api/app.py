@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from agent_platform.api.db import router as db_router
 from agent_platform.application.db_snapshot_service import DbSnapshotService
+from agent_platform.application.maintenance_runner import MaintenanceRunner
 from agent_platform.application.mission_service import MissionService
 from agent_platform.config.loader import load_settings
 from agent_platform.contracts.api import MissionRunRequest, MissionStreamEvent
@@ -18,20 +19,28 @@ from agent_platform.contracts.serialization import to_api_response
 from agent_platform.domain.enums import LogCategory
 from agent_platform.domain.exceptions import AgentPlatformError
 from agent_platform.domain.models import MissionRequest, utc_now
+from agent_platform.infrastructure.maintenance_job_store import MaintenanceJobStore
 from agent_platform.infrastructure.logging import configure_logging, get_logger
 
 
 def create_app() -> FastAPI:
     settings = load_settings()
+    mission_service = MissionService(settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         configure_logging(settings.logging)
+        maintenance_jobs = MaintenanceJobStore(settings.traces, mission_service.trace_store)
+        maintenance_runner = MaintenanceRunner(settings, mission_service, maintenance_jobs)
+        mission_service.attach_maintenance_runner(maintenance_runner)
+        app.state.maintenance_runner = maintenance_runner
+        await maintenance_runner.start()
         yield
+        await maintenance_runner.stop()
 
     app = FastAPI(title="Agent Platform", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
-    app.state.mission_service = MissionService(settings)
+    app.state.mission_service = mission_service
     app.state.db_contents_service = DbSnapshotService()
     app.state.logger = get_logger(LogCategory.API.value)
     app.include_router(db_router)

@@ -41,6 +41,10 @@ def test_apply_environment_loads_model_file_and_overrides_settings(tmp_path: Pat
         "AGENT_PLATFORM_BROWSER_VIEWPORT_WIDTH": "1600",
         "AGENT_PLATFORM_BROWSER_VIEWPORT_HEIGHT": "960",
         "AGENT_PLATFORM_BROWSER_USER_AGENT": "test-agent",
+        "AGENT_PLATFORM_MEMORY_PREFLIGHT_LIMIT": "5",
+        "AGENT_PLATFORM_MEMORY_MAINTENANCE_TOOL_BUDGET": "9",
+        "AGENT_PLATFORM_MEMORY_MAINTENANCE_TRACE_HEAD_CHARS": "4321",
+        "AGENT_PLATFORM_MEMORY_MAINTENANCE_TRACE_GREP_RADIUS_LINES": "3",
         "AGENT_PLATFORM_AGENT_RUN_TIMEOUT_SECONDS": "25",
         "AGENT_PLATFORM_DISABLE_COMPRESSION_TOOL": "true",
         "AGENT_PLATFORM_LOG_DIR": "var/logs",
@@ -64,6 +68,10 @@ def test_apply_environment_loads_model_file_and_overrides_settings(tmp_path: Pat
     assert settings.browser.viewport_width == 1600
     assert settings.browser.viewport_height == 960
     assert settings.browser.user_agent == "test-agent"
+    assert settings.memory.preflight_limit == 5
+    assert settings.memory.maintenance_tool_budget == 9
+    assert settings.memory.maintenance_trace_head_chars == 4321
+    assert settings.memory.maintenance_trace_grep_radius_lines == 3
     assert settings.runtime.agent_run_timeout_seconds == 25
     assert settings.debug.disable_compression_tool is True
     assert settings.logging.directory == Path("var/logs")

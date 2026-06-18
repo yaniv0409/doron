@@ -13,7 +13,9 @@ from agent_platform.domain.models import ToolResult
 from agent_platform.tools.compression_tools import compress_context
 from agent_platform.tools.db_tools import inspect_schema, read_graph, write_graph
 from agent_platform.tools.docs_tools import lookup_kuzu_docs
+from agent_platform.tools.memory_tools import deprecate_memory, read_memory, search_memory, update_memory, write_memory
 from agent_platform.tools.model_tools import request_model_switch
+from agent_platform.tools.trace_tools import grep_trace, read_trace_head
 from agent_platform.tools.web_tools import get_page_text, open_url
 
 try:
@@ -60,6 +62,7 @@ class AgentFactory:
 
     def _register_tools(self, agent: Any, runtime: MissionRuntime) -> list[str]:
         tool_names: list[str] = []
+        is_memory_maintenance = runtime.context.mission_request.mission_metadata.get("mission_kind") == "memory_maintenance" if runtime.context.mission_request.mission_metadata else False
 
         @agent.tool
         async def graph_read(
@@ -75,7 +78,7 @@ class AgentFactory:
             return result
         tool_names.append("graph_read")
 
-        if not runtime.services.settings.debug.disable_db_write_tool:
+        if not runtime.services.settings.debug.disable_db_write_tool and not is_memory_maintenance:
             @agent.tool
             async def graph_write(
                 ctx: RunContext[MissionRuntime],
@@ -110,7 +113,118 @@ class AgentFactory:
             return result
         tool_names.append("kuzu_reference")
 
-        if not runtime.services.settings.debug.disable_browser_tools:
+        if runtime.services.settings.memory.enabled:
+            @agent.tool
+            async def memory_search(ctx: RunContext[MissionRuntime], query: str, reason: str) -> ToolResult:
+                arguments = {"query": query, "reason": reason}
+                self._emit_tool_started(ctx.deps, "memory_search", arguments)
+                result = await search_memory(ctx.deps, query, reason)
+                self._emit_tool_completed(ctx.deps, "memory_search", arguments, result)
+                return result
+            tool_names.append("memory_search")
+
+            @agent.tool
+            async def memory_read(ctx: RunContext[MissionRuntime], ids: list[str], reason: str) -> ToolResult:
+                arguments = {"ids": ids, "reason": reason}
+                self._emit_tool_started(ctx.deps, "memory_read", arguments)
+                result = await read_memory(ctx.deps, ids, reason)
+                self._emit_tool_completed(ctx.deps, "memory_read", arguments, result)
+                return result
+            tool_names.append("memory_read")
+
+            @agent.tool
+            async def skill_search(ctx: RunContext[MissionRuntime], query: str, reason: str) -> ToolResult:
+                arguments = {"query": query, "reason": reason}
+                self._emit_tool_started(ctx.deps, "skill_search", arguments)
+                result = await search_memory(ctx.deps, query, reason, kinds=["skill"], tool_name="skill_search")
+                self._emit_tool_completed(ctx.deps, "skill_search", arguments, result)
+                return result
+            tool_names.append("skill_search")
+
+            @agent.tool
+            async def source_pack_search(ctx: RunContext[MissionRuntime], query: str, reason: str) -> ToolResult:
+                arguments = {"query": query, "reason": reason}
+                self._emit_tool_started(ctx.deps, "source_pack_search", arguments)
+                result = await search_memory(
+                    ctx.deps,
+                    query,
+                    reason,
+                    kinds=["source_pack"],
+                    tool_name="source_pack_search",
+                )
+                self._emit_tool_completed(ctx.deps, "source_pack_search", arguments, result)
+                return result
+            tool_names.append("source_pack_search")
+
+            if is_memory_maintenance:
+                @agent.tool
+                async def trace_head(
+                    ctx: RunContext[MissionRuntime],
+                    reason: str,
+                    chars: int | None = None,
+                ) -> ToolResult:
+                    arguments = {"reason": reason, "chars": chars}
+                    self._emit_tool_started(ctx.deps, "trace_head", arguments)
+                    result = await read_trace_head(ctx.deps, reason, chars)
+                    self._emit_tool_completed(ctx.deps, "trace_head", arguments, result)
+                    return result
+                tool_names.append("trace_head")
+
+                @agent.tool
+                async def trace_grep(
+                    ctx: RunContext[MissionRuntime],
+                    pattern: str,
+                    reason: str,
+                    radius_lines: int | None = None,
+                ) -> ToolResult:
+                    arguments = {"pattern": pattern, "reason": reason, "radius_lines": radius_lines}
+                    self._emit_tool_started(ctx.deps, "trace_grep", arguments)
+                    result = await grep_trace(ctx.deps, pattern, reason, radius_lines)
+                    self._emit_tool_completed(ctx.deps, "trace_grep", arguments, result)
+                    return result
+                tool_names.append("trace_grep")
+
+                @agent.tool
+                async def memory_write(
+                    ctx: RunContext[MissionRuntime],
+                    entries: list[dict[str, Any]],
+                    reason: str,
+                ) -> ToolResult:
+                    arguments = {"entry_count": len(entries), "reason": reason}
+                    self._emit_tool_started(ctx.deps, "memory_write", arguments)
+                    result = await write_memory(ctx.deps, entries, reason)
+                    self._emit_tool_completed(ctx.deps, "memory_write", arguments, result)
+                    return result
+                tool_names.append("memory_write")
+
+                @agent.tool
+                async def memory_update(
+                    ctx: RunContext[MissionRuntime],
+                    entries: list[dict[str, Any]],
+                    reason: str,
+                ) -> ToolResult:
+                    arguments = {"entry_count": len(entries), "reason": reason}
+                    self._emit_tool_started(ctx.deps, "memory_update", arguments)
+                    result = await update_memory(ctx.deps, entries, reason)
+                    self._emit_tool_completed(ctx.deps, "memory_update", arguments, result)
+                    return result
+                tool_names.append("memory_update")
+
+                @agent.tool
+                async def memory_deprecate(
+                    ctx: RunContext[MissionRuntime],
+                    ids: list[str],
+                    reason: str,
+                    replacement_id: str | None = None,
+                ) -> ToolResult:
+                    arguments = {"ids": ids, "replacement_id": replacement_id, "reason": reason}
+                    self._emit_tool_started(ctx.deps, "memory_deprecate", arguments)
+                    result = await deprecate_memory(ctx.deps, ids, reason, replacement_id)
+                    self._emit_tool_completed(ctx.deps, "memory_deprecate", arguments, result)
+                    return result
+                tool_names.append("memory_deprecate")
+
+        if not runtime.services.settings.debug.disable_browser_tools and not is_memory_maintenance:
             @agent.tool
             async def browser_open(ctx: RunContext[MissionRuntime], urls: list[str], reason: str) -> ToolResult:
                 if not ctx.deps.context.mission_request.web_enabled:

@@ -8,20 +8,43 @@ from agent_platform.domain.models import MissionRequest, RuntimeContext
 
 def build_system_prompt(context: RuntimeContext) -> str:
     request = context.mission_request
+    mission_kind = (request.mission_metadata or {}).get("mission_kind", "research")
     prompt_lines = [
         "You are a generic autonomous agent operating through explicit tools.",
-        "Use the graph database, browser, and Kuzu documentation tools when needed.",
+        "Use the graph database, browser, Kuzu documentation, and learned memory tools when needed.",
         "Keep intermediate reasoning concise and tool-oriented.",
         f"Every tool call must include a short reason argument.",
         "Tool calls may return structured results with fields: ok, tool, error_type, error_message, retry_hint, data.",
         "If a tool returns ok=false, do not give up. Read the error, decide the next step, and continue if the mission is still solvable.",
         "For database lookup failures, prefer: inspect schema, reformulate the query, consult Kuzu reference, then use web or model knowledge if needed.",
+        "Prefer learned memories, skills, and source packs before rediscovering schema or browsing.",
+        "Do not recreate graph structures or rediscover web sources if learned memory already covers them.",
+        "If memory, skills, or source packs are empty or insufficient, keep exploring. Empty memory is not a stop signal.",
+        "When prior memory does not answer the task, decide whether to inspect the graph/schema next or browse the web next based on what is most likely to move the mission forward.",
         f"The browser_open tool accepts a batch of URLs and may return partial results if some URLs fail.",
         f"Web tool budget: {context.web_tool_budget()} browser calls per mission; used so far: {context.web_tool_calls_used}; remaining: {context.web_tool_calls_remaining()}.",
         "A compress_context tool exists. Use it when working memory has become large or repetitive.",
         "The original mission prompt always remains unchanged. Compressed working memory may replace older notes and is authoritative after compression.",
         "If a stronger model is necessary, call the model-switch tool with a short reason.",
     ]
+    if context.memory_tool_call_budget is not None:
+        prompt_lines.append(
+            f"Memory tool budget: {context.memory_tool_call_budget} calls per mission; used so far: {context.memory_tool_calls_used}; remaining: {max(0, context.memory_tool_call_budget - context.memory_tool_calls_used)}."
+        )
+    learned_context = context.build_learned_context_block()
+    if learned_context:
+        prompt_lines.append("Learned context from durable memory:")
+        prompt_lines.append(learned_context)
+    if mission_kind == "memory_maintenance":
+        prompt_lines.extend(
+            [
+                "This is a post-mission memory maintenance run.",
+                "Improve future tool efficiency by writing, updating, or deprecating durable memory records.",
+                "Use graph reads for self-inspection when needed, but only mutate durable memory records.",
+                "Prefer distilled lessons, schema facts, source packs, and anti-patterns over raw dumps.",
+                "The mission prompt contains only the opening portion of the parent trace. Use trace_head and trace_grep to inspect the stored trace before making memory changes.",
+            ]
+        )
     prompt_lines.extend(_build_output_format_lines(request.output_schema))
     if not request.db_mutation_enabled:
         prompt_lines.append("Do not mutate the graph database.")
@@ -42,6 +65,10 @@ def build_handoff_prompt(context: RuntimeContext) -> str:
     ]
     if packet.notice:
         lines.append(f"Context notice: {packet.notice}")
+    learned_context = context.build_learned_context_block()
+    if learned_context:
+        lines.append("Learned context:")
+        lines.append(learned_context)
     if packet.notes:
         lines.append("Notes:")
         lines.extend(f"- {item}" for item in packet.notes)
@@ -51,6 +78,12 @@ def build_handoff_prompt(context: RuntimeContext) -> str:
     if packet.web_findings:
         lines.append("Web findings:")
         lines.extend(f"- {item}" for item in packet.web_findings)
+    if packet.worked_tool_patterns:
+        lines.append("Worked tool patterns:")
+        lines.extend(f"- {item}" for item in packet.worked_tool_patterns)
+    if packet.failed_tool_patterns:
+        lines.append("Failed tool patterns to avoid repeating:")
+        lines.extend(f"- {item}" for item in packet.failed_tool_patterns)
     if packet.tool_summaries:
         lines.append("Tool summary:")
         lines.extend(f"- {item}" for item in packet.tool_summaries)

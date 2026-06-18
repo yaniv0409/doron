@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from agent_platform.config.settings import TraceSettings
-from agent_platform.domain.models import CompressionEvent, ExecutionTrace, MissionRequest, RuntimeEvent, ToolCallRecord, WebArtifact, utc_now
+from agent_platform.domain.models import CompressionEvent, DurableMemoryRecord, ExecutionTrace, MemoryMutationRecord, MemoryRetrievalRecord, MissionRequest, RuntimeEvent, ToolCallRecord, WebArtifact, utc_now
 from agent_platform.infrastructure.trace_store import TraceStore
 
 
@@ -42,6 +42,30 @@ def test_trace_store_round_trip_preserves_tool_calls_and_web_artifacts(tmp_path:
                 links_count=2,
             ),
         ],
+        memory_retrievals=[
+            MemoryRetrievalRecord(
+                query="company research",
+                kinds=["skill"],
+                results=[
+                    DurableMemoryRecord(
+                        id="skill-1",
+                        kind="skill",
+                        title="Use source packs first",
+                        body="Check learned sources before browsing",
+                    )
+                ],
+                source="preflight",
+            )
+        ],
+        memory_mutations=[
+            MemoryMutationRecord(
+                action="write",
+                memory_id="mem-1",
+                kind="memory",
+                title="Do not recreate Company table",
+                reason="reusable schema fact",
+            )
+        ],
         compression_events=[
             CompressionEvent(
                 trigger="manual",
@@ -72,6 +96,8 @@ def test_trace_store_round_trip_preserves_tool_calls_and_web_artifacts(tmp_path:
     assert loaded.web_artifacts[0].load_state == "networkidle"
     assert loaded.web_artifacts[0].browser_stage == "extract_complete"
     assert loaded.web_artifacts[0].links_count == 2
+    assert loaded.memory_retrievals[0].results[0].title == "Use source packs first"
+    assert loaded.memory_mutations[0].action == "write"
     assert loaded.compression_events[0].summarizer_model == "openai/gpt-5.2"
     assert loaded.runtime_events[0].phase == "agent_setup"
 
@@ -107,3 +133,32 @@ def test_checkpoint_copies_directory_database_path(tmp_path: Path) -> None:
 
     assert checkpoint.is_dir()
     assert (checkpoint / "data.bin").read_text(encoding="utf-8") == "db"
+
+
+def test_trace_store_supports_head_grep_and_skeleton(tmp_path: Path) -> None:
+    store = TraceStore(
+        TraceSettings(
+            directory=tmp_path / "traces",
+            checkpoint_directory=tmp_path / "checkpoints",
+        )
+    )
+    trace_id = "trace-grep"
+    raw_payload = {
+        "trace_id": trace_id,
+        "tool_calls": [
+            {"name": "graph_read", "result_summary": "returned 1 row"},
+            {"name": "browser_open", "result_summary": "fetched 1 url"},
+        ],
+        "runtime_events": [
+            {"phase": "tool.started", "message": "graph_read started"},
+            {"phase": "tool.completed", "message": "graph_read completed"},
+        ],
+    }
+
+    store.write_trace_skeleton(trace_id, raw_payload)
+
+    assert store.read_trace_head(trace_id, 20).startswith("{\n  \"trace_id\"")
+    snippets = store.grep_trace_text(trace_id, "graph_read", radius_lines=1, max_matches=3, max_lines=20)
+    assert snippets
+    assert snippets[0]["lines"][0]["line_number"] >= 1
+    assert any("graph_read" in line["text"] for line in snippets[0]["lines"])

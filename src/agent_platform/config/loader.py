@@ -179,6 +179,66 @@ def apply_environment(settings: AppSettings, environ: dict[str, str] | os._Envir
     )
     _set_if_present(
         environ,
+        "AGENT_PLATFORM_MEMORY_ENABLED",
+        lambda value: _setattr(settings.memory, "enabled", _to_bool(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_MEMORY_PREFLIGHT_LIMIT",
+        lambda value: _setattr(settings.memory, "preflight_limit", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_MEMORY_SEARCH_CANDIDATE_LIMIT",
+        lambda value: _setattr(settings.memory, "search_candidate_limit", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_MEMORY_LEARNED_CONTEXT_MAX_ITEMS",
+        lambda value: _setattr(settings.memory, "learned_context_max_items", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_MEMORY_LEARNED_CONTEXT_MAX_CHARS",
+        lambda value: _setattr(settings.memory, "learned_context_max_chars", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_MEMORY_MAINTENANCE_ENABLED",
+        lambda value: _setattr(settings.memory, "maintenance_enabled", _to_bool(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_MEMORY_MAINTENANCE_TOOL_BUDGET",
+        lambda value: _setattr(settings.memory, "maintenance_tool_budget", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_MEMORY_MAINTENANCE_RELATED_MEMORY_LIMIT",
+        lambda value: _setattr(settings.memory, "maintenance_related_memory_limit", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_MEMORY_MAINTENANCE_TRACE_HEAD_CHARS",
+        lambda value: _setattr(settings.memory, "maintenance_trace_head_chars", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_MEMORY_MAINTENANCE_TRACE_GREP_RADIUS_LINES",
+        lambda value: _setattr(settings.memory, "maintenance_trace_grep_radius_lines", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_MEMORY_MAINTENANCE_TRACE_GREP_MAX_MATCHES",
+        lambda value: _setattr(settings.memory, "maintenance_trace_grep_max_matches", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_MEMORY_MAINTENANCE_TRACE_GREP_MAX_LINES",
+        lambda value: _setattr(settings.memory, "maintenance_trace_grep_max_lines", int(value)),
+    )
+    _set_if_present(
+        environ,
         "AGENT_PLATFORM_AGENT_RUN_TIMEOUT_SECONDS",
         lambda value: _setattr(settings.runtime, "agent_run_timeout_seconds", int(value)),
     )
