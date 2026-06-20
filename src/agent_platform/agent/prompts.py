@@ -50,7 +50,7 @@ def build_system_prompt(context: RuntimeContext) -> str:
     if not request.db_mutation_enabled:
         prompt_lines.append("Do not mutate the graph database.")
     if not request.web_enabled:
-        prompt_lines.append("Do not use browser tools.")
+        prompt_lines.append("Do not use browser tools or web search.")
     prompt_lines.append(f"Trace ID: {context.trace_id}")
     return "\n".join(prompt_lines)
 

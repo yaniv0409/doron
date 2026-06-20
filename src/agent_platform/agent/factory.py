@@ -27,11 +27,13 @@ from agent_platform.tools.web_tools import get_page_text, open_url
 
 try:
     from pydantic_ai import Agent, RunContext
+    from pydantic_ai.capabilities import WebSearch
     from pydantic_ai.models.openrouter import OpenRouterModel
     from pydantic_ai.providers.openrouter import OpenRouterProvider
 except ImportError:  # pragma: no cover
     Agent = None
     RunContext = Any
+    WebSearch = None
     OpenRouterModel = None
     OpenRouterProvider = None
 
@@ -63,6 +65,10 @@ class AgentFactory:
         output_type = build_output_type(runtime.context.mission_request.output_schema)
         if output_type is not None:
             agent_kwargs["output_type"] = output_type
+        if runtime.context.mission_request.web_enabled:
+            if WebSearch is None:
+                raise ConfigurationError("pydantic-ai web search support is not installed")
+            agent_kwargs["capabilities"] = [WebSearch(local="duckduckgo")]
         agent = Agent(model, **agent_kwargs)
         tool_names = self._register_tools(agent, runtime)
         return AgentSession(runtime=runtime, agent=agent, tool_names=tool_names)
@@ -70,6 +76,8 @@ class AgentFactory:
     def _register_tools(self, agent: Any, runtime: MissionRuntime) -> list[str]:
         tool_names: list[str] = []
         is_skill_maintenance = runtime.context.mission_request.mission_metadata.get("mission_kind") == "skill_maintenance" if runtime.context.mission_request.mission_metadata else False
+        if runtime.context.mission_request.web_enabled:
+            tool_names.append("web_search")
 
         if runtime.services.settings.memory.enabled:
             @agent.tool

@@ -5,6 +5,7 @@ Generic agent platform scaffold built around:
 - `pydantic-ai` for orchestration
 - Kuzu for graph persistence
 - Playwright for web automation
+- Pydantic AI web search with a DuckDuckGo local fallback
 - OpenRouter for model and embedding access
 
 Web extraction behavior:
