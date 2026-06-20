@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 from agent_platform.application.mission_service import MissionService
 from agent_platform.config.settings import AppSettings
-from agent_platform.domain.models import MissionRequest
+from agent_platform.domain.exceptions import ModelError
+from agent_platform.domain.models import ModelDescriptor, MissionRequest, RuntimeContext, utc_now
 
 
 class HangingAgent:
@@ -15,6 +16,39 @@ class HangingAgent:
 class FakeAgentFactory:
     def create(self, runtime):
         return SimpleNamespace(runtime=runtime, agent=HangingAgent(), tool_names=["skill_search"])
+
+
+class FakeTraceStore:
+    def write_request_snapshot(self, *args, **kwargs) -> None:
+        pass
+
+    def write_trace_skeleton(self, *args, **kwargs) -> None:
+        pass
+
+    def write_trace(self, *args, **kwargs) -> None:
+        pass
+
+    def write_progress(self, *args, **kwargs) -> None:
+        pass
+
+    def trace_path(self, trace_id: str):
+        return Path("/tmp") / trace_id
+
+    def read_raw_trace_text(self, trace_id: str) -> str:
+        return ""
+
+
+class FakeChatClient:
+    async def complete_json(self, *, model: str, system_prompt: str, user_prompt: str):
+        return {
+            "notes": ["compressed note"],
+            "db_findings": [],
+            "web_findings": [],
+            "tool_summaries": ["compressed summary"],
+            "tool_outcomes": [],
+            "unresolved_goals": [],
+            "notice": "compressed after overflow",
+        }
 
 
 def test_mission_service_times_out_and_writes_progress(tmp_path: Path) -> None:
@@ -58,3 +92,105 @@ def test_mission_service_times_out_and_writes_progress(tmp_path: Path) -> None:
     assert result.error.code == "agent_run_timeout"
     progress_path = settings.traces.directory / "trace-timeout" / "progress.json"
     assert progress_path.exists()
+
+
+def test_mission_service_compresses_and_retries_on_context_overflow(tmp_path: Path) -> None:
+    settings = AppSettings()
+    settings.memory.enabled = False
+    settings.memory.maintenance_enabled = False
+    settings.traces.directory = tmp_path / "traces"
+    settings.traces.checkpoint_directory = tmp_path / "checkpoints"
+    service = MissionService(settings)
+    service._runtime_builder.services.trace_store = FakeTraceStore()
+    service._runtime_builder.services.chat_client = FakeChatClient()
+    service._runtime_builder.services.model_catalog = SimpleNamespace(
+        strongest_allowed=lambda allowed: allowed[-1],
+    )
+
+    request = MissionRequest(prompt="hello", db_path="/tmp/db.kuzu")
+    current_model = ModelDescriptor(name="openai/gpt-4.1-mini", rank=10, context_window=4000)
+    stronger_model = ModelDescriptor(name="openai/gpt-5.2", rank=100, context_window=32000)
+    context = RuntimeContext(
+        trace_id="trace-overflow",
+        mission_request=request,
+        started_at=utc_now(),
+        current_model=current_model,
+        allowed_models=[current_model, stronger_model],
+    )
+    runtime = SimpleNamespace(
+        context=context,
+        browser=SimpleNamespace(close=lambda: asyncio.sleep(0)),
+        services=service._runtime_builder.services,
+    )
+    service._runtime_builder.build = lambda _: runtime
+
+    prompts: list[str] = []
+
+    async def fake_run_once(runtime, prompt: str):
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            raise ModelError(
+                "chat completion request failed: {'message': 'This endpoint's maximum context length is 400000 tokens. However, you requested about 859555 tokens (858946 of text input, 609 of tool input). Please reduce the length of either one, or use the context-compression plugin to compress your prompt automatically.', 'code': 400}"
+            )
+        return "final answer"
+
+    service._run_once = fake_run_once
+
+    result = asyncio.run(service.run(request))
+
+    assert result.status.value == "completed"
+    assert result.result == "final answer"
+    assert len(prompts) == 2
+    assert prompts[0] == "hello"
+    assert "Continue this mission from a previous model handoff." in prompts[1]
+    assert context.compressed_memory is not None
+    assert context.compression_events
+    assert context.reasoning_notes[-1].startswith("Context was refreshed and compressed:")
+
+
+def test_mission_service_does_not_compress_on_other_model_errors(tmp_path: Path) -> None:
+    settings = AppSettings()
+    settings.memory.enabled = False
+    settings.memory.maintenance_enabled = False
+    settings.traces.directory = tmp_path / "traces"
+    settings.traces.checkpoint_directory = tmp_path / "checkpoints"
+    service = MissionService(settings)
+    service._runtime_builder.services.trace_store = FakeTraceStore()
+    service._runtime_builder.services.chat_client = FakeChatClient()
+    service._runtime_builder.services.model_catalog = SimpleNamespace(
+        strongest_allowed=lambda allowed: allowed[-1],
+    )
+
+    request = MissionRequest(prompt="hello", db_path="/tmp/db.kuzu")
+    current_model = ModelDescriptor(name="openai/gpt-4.1-mini", rank=10, context_window=4000)
+    stronger_model = ModelDescriptor(name="openai/gpt-5.2", rank=100, context_window=32000)
+    context = RuntimeContext(
+        trace_id="trace-other-model-error",
+        mission_request=request,
+        started_at=utc_now(),
+        current_model=current_model,
+        allowed_models=[current_model, stronger_model],
+    )
+    runtime = SimpleNamespace(
+        context=context,
+        browser=SimpleNamespace(close=lambda: asyncio.sleep(0)),
+        services=service._runtime_builder.services,
+    )
+    service._runtime_builder.build = lambda _: runtime
+
+    prompts: list[str] = []
+
+    async def fake_run_once(runtime, prompt: str):
+        prompts.append(prompt)
+        raise ModelError("chat completion request failed: upstream provider returned a bad request")
+
+    service._run_once = fake_run_once
+
+    result = asyncio.run(service.run(request))
+
+    assert result.status.value == "failed"
+    assert result.error is not None
+    assert result.error.code == "ModelError"
+    assert len(prompts) == 1
+    assert context.compressed_memory is None
+    assert not context.compression_events

@@ -13,7 +13,7 @@ Requires-Dist: jsonschema>=4.23.0
 Requires-Dist: kuzu>=0.8.0
 Requires-Dist: playwright>=1.53.0
 Requires-Dist: pydantic>=2.8.0
-Requires-Dist: pydantic-ai-slim[openrouter]>=0.0.24
+Requires-Dist: pydantic-ai-slim[duckduckgo,openrouter]>=0.0.24
 Requires-Dist: python-dotenv>=1.0.1
 Requires-Dist: typing-extensions>=4.12.2
 Requires-Dist: uvicorn>=0.30.0
@@ -28,6 +28,7 @@ Generic agent platform scaffold built around:
 - `pydantic-ai` for orchestration
 - Kuzu for graph persistence
 - Playwright for web automation
+- Pydantic AI web search with a DuckDuckGo local fallback
 - OpenRouter for model and embedding access
 
 Web extraction behavior:

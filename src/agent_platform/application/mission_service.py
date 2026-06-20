@@ -10,7 +10,7 @@ from agent_platform.application.live_events import emit_runtime_event, emit_stre
 from agent_platform.application.runtime_builder import MissionRuntime, RuntimeBuilder
 from agent_platform.config.settings import AppSettings
 from agent_platform.domain.enums import LogCategory, MissionStatus, ResultFormat
-from agent_platform.domain.exceptions import AgentPlatformError, ContextRefreshRequested, ModelSwitchRequested, OutputValidationError
+from agent_platform.domain.exceptions import AgentPlatformError, ContextRefreshRequested, ModelError, ModelSwitchRequested, OutputValidationError
 from agent_platform.domain.models import ExecutionTrace, MemoryRetrievalRecord, MissionError, MissionRequest, MissionResult, utc_now
 from agent_platform.infrastructure.logging import get_logger
 
@@ -75,6 +75,12 @@ class MissionService:
                         f"Context was refreshed and compressed: {exc.reason}",
                     )
                     continue
+                except ModelError as exc:
+                    recovered = await self._maybe_recover_from_context_overflow(runtime, exc)
+                    if recovered:
+                        prompt = build_handoff_prompt(runtime.context)
+                        continue
+                    raise
                 if runtime.context.pending_model_switch:
                     next_model = self._promote_model(runtime, runtime.context.pending_model_switch)
                     if next_model is None:
@@ -272,6 +278,55 @@ class MissionService:
         await runtime.browser.close()
         self._logger.error(message, extra={"trace_id": runtime.context.trace_id})
         return result
+
+    async def _maybe_recover_from_context_overflow(self, runtime: MissionRuntime, exc: ModelError) -> bool:
+        if not self._is_context_length_error(exc):
+            return False
+        if not runtime.services.settings.compression.enabled:
+            return False
+        if runtime.context.compression_in_progress:
+            return False
+        reason = str(exc)
+        self._append_runtime_event(
+            runtime,
+            "context_refresh",
+            "context refresh requested",
+            {
+                "reason": reason,
+                "trigger": "context_overflow",
+            },
+        )
+        runtime.context.compression_in_progress = True
+        try:
+            result = await runtime.services.context_compressor.compress(
+                runtime,
+                trigger="automatic",
+                reason=reason,
+            )
+        finally:
+            runtime.context.compression_in_progress = False
+        if not result.ok:
+            runtime.context.reasoning_notes.append(
+                f"context overflow compression failed: {result.error_message}",
+            )
+            return False
+        runtime.context.pending_context_refresh_reason = f"Automatic context compression: {reason}"
+        runtime.context.reasoning_notes.append(
+            f"Context was refreshed and compressed: {reason}",
+        )
+        return True
+
+    def _is_context_length_error(self, exc: ModelError) -> bool:
+        message = str(exc).lower()
+        markers = (
+            "maximum context length",
+            "context length",
+            "context_length",
+            "requested about",
+            "reduce the length of either one",
+            "prompt too long",
+        )
+        return any(marker in message for marker in markers)
 
     def _prepare_runtime(self, runtime: MissionRuntime) -> None:
         metadata = runtime.context.mission_request.mission_metadata or {}
