@@ -110,7 +110,7 @@ class AppSettings(BaseModel):
     debug: DebugSettings = Field(default_factory=DebugSettings)
     models: list[ModelSettings] = Field(
         default_factory=lambda: [
-            ModelSettings(name="openai/gpt-4.1-mini", rank=10, is_default=True),
-            ModelSettings(name="openai/gpt-5.2", rank=100),
+            ModelSettings(name="deepseek/deepseek-v4-pro", rank=10, is_default=True),
+            ModelSettings(name="google/gemini-3.5-flash", rank=100),
         ]
     )

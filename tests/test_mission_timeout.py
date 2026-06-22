@@ -31,11 +31,11 @@ class FakeTraceStore:
     def write_progress(self, *args, **kwargs) -> None:
         pass
 
+    def read_raw_trace_text(self, trace_id: str) -> str:
+        return '{"trace_id":"parent-trace","tool_calls":[]}'
+
     def trace_path(self, trace_id: str):
         return Path("/tmp") / trace_id
-
-    def read_raw_trace_text(self, trace_id: str) -> str:
-        return ""
 
 
 class FakeChatClient:
@@ -49,6 +49,23 @@ class FakeChatClient:
             "unresolved_goals": [],
             "notice": "compressed after overflow",
         }
+
+
+class CapturingAgent:
+    def __init__(self, prompts: list[object]) -> None:
+        self._prompts = prompts
+
+    async def run(self, prompt: object, deps: object):
+        self._prompts.append(prompt)
+        return SimpleNamespace(output="final answer")
+
+
+class CapturingAgentFactory:
+    def __init__(self, prompts: list[object]) -> None:
+        self._prompts = prompts
+
+    def create(self, runtime):
+        return SimpleNamespace(runtime=runtime, agent=CapturingAgent(self._prompts), tool_names=["skill_search"])
 
 
 def test_mission_service_times_out_and_writes_progress(tmp_path: Path) -> None:
@@ -119,6 +136,7 @@ def test_mission_service_compresses_and_retries_on_context_overflow(tmp_path: Pa
     )
     runtime = SimpleNamespace(
         context=context,
+        db=SimpleNamespace(),
         browser=SimpleNamespace(close=lambda: asyncio.sleep(0)),
         services=service._runtime_builder.services,
     )
@@ -173,6 +191,7 @@ def test_mission_service_does_not_compress_on_other_model_errors(tmp_path: Path)
     )
     runtime = SimpleNamespace(
         context=context,
+        db=SimpleNamespace(),
         browser=SimpleNamespace(close=lambda: asyncio.sleep(0)),
         services=service._runtime_builder.services,
     )
@@ -194,3 +213,58 @@ def test_mission_service_does_not_compress_on_other_model_errors(tmp_path: Path)
     assert len(prompts) == 1
     assert context.compressed_memory is None
     assert not context.compression_events
+
+
+def test_skill_maintenance_run_attaches_parent_trace(tmp_path: Path) -> None:
+    settings = AppSettings()
+    settings.memory.enabled = False
+    settings.memory.maintenance_enabled = False
+    settings.traces.directory = tmp_path / "traces"
+    settings.traces.checkpoint_directory = tmp_path / "checkpoints"
+    service = MissionService(settings)
+    service._runtime_builder.services.trace_store = FakeTraceStore()
+    service._runtime_builder.services.chat_client = FakeChatClient()
+    service._runtime_builder.services.model_catalog = SimpleNamespace(
+        strongest_allowed=lambda allowed: allowed[-1],
+    )
+    service._runtime_builder.services.memory_manager = SimpleNamespace(ensure_schema=lambda db: None)
+
+    captured_prompts: list[object] = []
+    service._agent_factory = CapturingAgentFactory(captured_prompts)
+
+    request = MissionRequest(
+        prompt="maintain skills",
+        db_path="/tmp/db.kuzu",
+        mission_metadata={"mission_kind": "skill_maintenance", "parent_trace_id": "parent-trace"},
+        web_enabled=False,
+    )
+    current_model = ModelDescriptor(name="openai/gpt-4.1-mini", rank=10, context_window=4000)
+    stronger_model = ModelDescriptor(name="openai/gpt-5.2", rank=100, context_window=32000)
+    context = RuntimeContext(
+        trace_id="trace-maintenance",
+        mission_request=request,
+        started_at=utc_now(),
+        current_model=current_model,
+        allowed_models=[current_model, stronger_model],
+    )
+    runtime = SimpleNamespace(
+        context=context,
+        db=SimpleNamespace(),
+        browser=SimpleNamespace(close=lambda: asyncio.sleep(0)),
+        services=service._runtime_builder.services,
+    )
+    service._runtime_builder.build = lambda _: runtime
+    service._maybe_schedule_skill_maintenance = lambda trace: None
+
+    result = asyncio.run(service.run(request))
+
+    assert result.status.value == "completed"
+    assert result.result == "final answer"
+    assert len(captured_prompts) == 1
+    prompt = captured_prompts[0]
+    assert isinstance(prompt, list)
+    assert prompt[0] == "maintain skills"
+    attachment = prompt[1]
+    assert attachment.media_type == "text/plain"
+    assert attachment.url.startswith("data:text/plain;base64,")
+    assert attachment.identifier == "parent-trace"

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import asyncio
+import json
 from typing import Any
 
 from agent_platform.agent.factory import AgentFactory
@@ -13,6 +15,12 @@ from agent_platform.domain.enums import LogCategory, MissionStatus, ResultFormat
 from agent_platform.domain.exceptions import AgentPlatformError, ContextRefreshRequested, ModelError, ModelSwitchRequested, OutputValidationError
 from agent_platform.domain.models import ExecutionTrace, MemoryRetrievalRecord, MissionError, MissionRequest, MissionResult, utc_now
 from agent_platform.infrastructure.logging import get_logger
+
+try:
+    from pydantic_ai.messages import DocumentUrl, UserContent
+except ImportError:  # pragma: no cover
+    DocumentUrl = Any
+    UserContent = Any
 
 
 class MissionService:
@@ -173,7 +181,8 @@ class MissionService:
     async def _run_once(self, runtime: MissionRuntime, prompt: str) -> Any:
         session = self._agent_factory.create(runtime)
         extra = {"trace_id": runtime.context.trace_id}
-        prompt_size = len(prompt)
+        agent_prompt = self._build_agent_prompt(runtime, prompt)
+        prompt_size = self._prompt_size(agent_prompt)
         working_memory_size = runtime.context.estimate_working_memory_size()
         self._append_runtime_event(
             runtime,
@@ -196,7 +205,7 @@ class MissionService:
         self._append_runtime_event(runtime, "agent_run_started", "agent.run started")
         try:
             result = await asyncio.wait_for(
-                session.agent.run(prompt, deps=runtime),
+                session.agent.run(agent_prompt, deps=runtime),
                 timeout=runtime.services.settings.runtime.agent_run_timeout_seconds,
             )
         except ModelSwitchRequested:
@@ -212,6 +221,40 @@ class MissionService:
         self._log_runtime_state(runtime)
         output = getattr(result, "output", result)
         return output
+
+    def _build_agent_prompt(self, runtime: MissionRuntime, prompt: str) -> str | list[UserContent]:
+        if not self._is_skill_maintenance(runtime):
+            return prompt
+        return [
+            prompt,
+            self._build_trace_attachment(runtime),
+        ]
+
+    def _build_trace_attachment(self, runtime: MissionRuntime) -> DocumentUrl:
+        parent_trace_id = self._parent_trace_id(runtime)
+        trace_text = runtime.services.trace_store.read_raw_trace_text(parent_trace_id)
+        data = base64.b64encode(trace_text.encode("utf-8")).decode("ascii")
+        return DocumentUrl(
+            url=f"data:text/plain;base64,{data}",
+            media_type="text/plain",
+            identifier=parent_trace_id,
+        )
+
+    def _parent_trace_id(self, runtime: MissionRuntime) -> str:
+        metadata = runtime.context.mission_request.mission_metadata or {}
+        parent_trace_id = metadata.get("parent_trace_id")
+        if not isinstance(parent_trace_id, str) or not parent_trace_id:
+            raise ModelError("skill maintenance mission is missing parent_trace_id metadata")
+        return parent_trace_id
+
+    def _is_skill_maintenance(self, runtime: MissionRuntime) -> bool:
+        metadata = runtime.context.mission_request.mission_metadata or {}
+        return metadata.get("mission_kind") == "skill_maintenance"
+
+    def _prompt_size(self, prompt: str | list[UserContent]) -> int:
+        if isinstance(prompt, str):
+            return len(prompt)
+        return len(json.dumps(prompt, default=str))
 
     def _promote_model(self, runtime: MissionRuntime, requested_model: str) -> Any | None:
         for model in runtime.context.allowed_models:
@@ -423,10 +466,6 @@ class MissionService:
             )
 
     def _build_skill_maintenance_prompt(self, trace: ExecutionTrace) -> str:
-        trace_head = self._runtime_builder.services.trace_store.read_trace_head(
-            trace.trace_id,
-            self._runtime_builder.services.settings.memory.maintenance_trace_head_chars,
-        )
         return "\n".join(
             [
                 "Your mission is to harden Doron's skills after a completed mission.",
@@ -435,8 +474,7 @@ class MissionService:
                 "Encourage good tool use and discourage wasteful repeated web source rediscovery.",
                 "Only mutate skill records.",
                 f"Parent trace ID: {trace.trace_id}",
-                f"Parent mission excerpt ({self._runtime_builder.services.settings.memory.maintenance_trace_head_chars} chars):",
-                trace_head,
+                "A full trace.json attachment will be provided separately as the canonical mission record.",
                 "Return a concise plain-text summary of what skill changes you made.",
             ]
         )

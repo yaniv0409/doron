@@ -169,7 +169,7 @@ def test_maintenance_run_writes_trace_skeleton(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
-def test_skill_maintenance_prompt_uses_trace_head_not_full_trace(tmp_path: Path) -> None:
+def test_skill_maintenance_prompt_mentions_attachment_not_trace_head(tmp_path: Path) -> None:
     settings = AppSettings()
     settings.traces.directory = tmp_path / "traces"
     settings.traces.checkpoint_directory = tmp_path / "checkpoints"
@@ -184,6 +184,7 @@ def test_skill_maintenance_prompt_uses_trace_head_not_full_trace(tmp_path: Path)
     prompt = service._build_skill_maintenance_prompt(trace)  # type: ignore[arg-type]
 
     assert "Parent trace ID: parent-trace" in prompt
-    assert "0123456789ABCDEFGH" in prompt
+    assert "trace.json attachment" in prompt
+    assert "0123456789ABCDEFGH" not in prompt
     assert "harden Doron's skills" in prompt
     assert "Use graph read tools to inspect existing graph state" in prompt
