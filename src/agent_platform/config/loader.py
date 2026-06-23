@@ -54,6 +54,41 @@ def apply_environment(settings: AppSettings, environ: dict[str, str] | os._Envir
     )
     _set_if_present(
         environ,
+        "AGENT_PLATFORM_SESSION_DIR",
+        lambda value: _setattr(settings.sessions, "directory", Path(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_SESSION_DB_DIR",
+        lambda value: _setattr(settings.sessions, "db_directory", Path(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_SHARED_DB_PATH",
+        lambda value: _setattr(settings.sessions, "shared_db_path", Path(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_SESSION_HISTORY_TURN_LIMIT",
+        lambda value: _setattr(settings.sessions, "history_turn_limit", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_SESSION_SUMMARY_TOOL_LIMIT",
+        lambda value: _setattr(settings.sessions, "summary_tool_limit", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_GRAPH_NODE_LIMIT",
+        lambda value: _setattr(settings.sessions, "graph_node_limit", int(value)),
+    )
+    _set_if_present(
+        environ,
+        "AGENT_PLATFORM_GRAPH_EDGE_LIMIT",
+        lambda value: _setattr(settings.sessions, "graph_edge_limit", int(value)),
+    )
+    _set_if_present(
+        environ,
         "AGENT_PLATFORM_BROWSER_HEADLESS",
         lambda value: _setattr(settings.browser, "headless", _to_bool(value)),
     )

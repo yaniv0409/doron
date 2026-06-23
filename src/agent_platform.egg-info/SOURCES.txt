@@ -12,9 +12,11 @@ src/agent_platform/agent/prompts.py
 src/agent_platform/api/__init__.py
 src/agent_platform/api/app.py
 src/agent_platform/api/db.py
+src/agent_platform/api/sessions.py
 src/agent_platform/application/__init__.py
 src/agent_platform/application/context_compression.py
 src/agent_platform/application/db_snapshot_service.py
+src/agent_platform/application/graph_snapshot_service.py
 src/agent_platform/application/live_events.py
 src/agent_platform/application/maintenance_runner.py
 src/agent_platform/application/memory_manager.py
@@ -22,6 +24,7 @@ src/agent_platform/application/mission_service.py
 src/agent_platform/application/output_schema.py
 src/agent_platform/application/result_validation.py
 src/agent_platform/application/runtime_builder.py
+src/agent_platform/application/session_service.py
 src/agent_platform/cli/__init__.py
 src/agent_platform/cli/api_client.py
 src/agent_platform/cli/chat.py
@@ -34,6 +37,7 @@ src/agent_platform/contracts/__init__.py
 src/agent_platform/contracts/api.py
 src/agent_platform/contracts/db.py
 src/agent_platform/contracts/serialization.py
+src/agent_platform/contracts/session.py
 src/agent_platform/domain/__init__.py
 src/agent_platform/domain/enums.py
 src/agent_platform/domain/exceptions.py
@@ -46,6 +50,7 @@ src/agent_platform/infrastructure/logging.py
 src/agent_platform/infrastructure/maintenance_job_store.py
 src/agent_platform/infrastructure/model_catalog.py
 src/agent_platform/infrastructure/openrouter_client.py
+src/agent_platform/infrastructure/session_store.py
 src/agent_platform/infrastructure/trace_store.py
 src/agent_platform/tools/__init__.py
 src/agent_platform/tools/compression_tools.py
@@ -67,6 +72,7 @@ tests/test_db_snapshot_api.py
 tests/test_db_snapshot_service.py
 tests/test_docs_lookup.py
 tests/test_kuzu_client.py
+tests/test_logging.py
 tests/test_maintenance_runner.py
 tests/test_memory_manager.py
 tests/test_memory_runtime.py
@@ -75,4 +81,5 @@ tests/test_output_contract.py
 tests/test_recoverable_tools.py
 tests/test_result_validation.py
 tests/test_serialization.py
+tests/test_session_api.py
 tests/test_trace_store.py

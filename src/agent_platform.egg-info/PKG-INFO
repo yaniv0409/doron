@@ -31,6 +31,14 @@ Generic agent platform scaffold built around:
 - Pydantic AI web search with a DuckDuckGo local fallback
 - OpenRouter for model and embedding access
 
+Research workspace features:
+
+- named durable research sessions stored as JSON under `sessions/`
+- shared or dedicated graph databases under `dbs/`
+- live per-request SSE streaming for mission progress and tool activity
+- session-scoped web browsing tool limits with per-message overrides
+- a React web UI under `web/` with chat, sessions, and graph inspection
+
 Web extraction behavior:
 
 - Playwright navigation with `domcontentloaded` and `networkidle`
@@ -103,11 +111,64 @@ Receive:
 
 Stream mode emits live mission progress, tool events, and the final result over SSE from the same endpoint.
 
+## Session API
+
+`POST /sessions/open`
+
+- create or resume a named session
+- returns a stable `session_id`
+- uses `dbs/shared.kuzu` by default
+- creates a dedicated `dbs/<session-name>-<id>.kuzu` database when requested
+
+`GET /sessions`
+
+- list sessions for the sidebar
+
+`GET /sessions/{session_id}`
+
+- full session metadata and chat history
+
+`PATCH /sessions/{session_id}`
+
+- update session defaults such as `web_tool_call_limit`
+
+`POST /sessions/{session_id}/chat`
+
+- blocking chat response
+
+`POST /sessions/{session_id}/chat/stream`
+
+- streamed SSE chat response
+- emits session events plus the existing mission/tool/progress events
+
+`GET /sessions/{session_id}/graph`
+
+- graph snapshot for the session database
+- nodes and edges include their metadata for click inspection in the UI
+
 `POST /db/contents`
 
 Read-only database snapshot endpoint for end apps. It discovers whatever tables exist in a Kuzu database file given in `db_path` and returns a generic `tables` snapshot with optional schema, counts, connections, and bounded sample rows.
 
 See `docs/` for architecture and implementation details.
+
+## Web UI
+
+The web UI lives in `web/` and talks to the session API.
+
+Run it with:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+By default the frontend calls `http://127.0.0.1:8000`. Override with:
+
+```bash
+VITE_API_BASE_URL=http://127.0.0.1:8000 npm run dev
+```
 
 ## Terminal chat
 

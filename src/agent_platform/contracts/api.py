@@ -14,6 +14,7 @@ class MissionRunRequest(BaseModel):
     mission_metadata: dict[str, Any] | None = None
     web_enabled: bool = True
     db_mutation_enabled: bool = True
+    web_tool_call_limit: int | None = Field(default=None, ge=0)
     stream: bool = False
 
 

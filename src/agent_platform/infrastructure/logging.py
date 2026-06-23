@@ -29,9 +29,17 @@ def _build_handler(settings: LoggingSettings, name: str) -> RotatingFileHandler:
         maxBytes=settings.max_bytes,
         backupCount=settings.backup_count,
     )
+    handler.addFilter(_DefaultTraceIdFilter())
     handler.setFormatter(
         logging.Formatter(
             "%(asctime)s %(levelname)s trace_id=%(trace_id)s %(message)s",
         )
     )
     return handler
+
+
+class _DefaultTraceIdFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not hasattr(record, "trace_id") or record.trace_id is None:
+            record.trace_id = "-"
+        return True

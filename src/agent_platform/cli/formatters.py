@@ -20,12 +20,12 @@ def format_stream_event(event: MissionStreamEvent) -> str:
             return f"{prefix} Progress: {phase} - {message}"
         return f"{prefix} Progress: {phase}"
     if event.event == "tool.started":
-        name = event.data.get("name", "tool")
+        name = _resolve_tool_name(event.data)
         return f"{prefix} Tool started: {name}"
     if event.event == "tool.completed":
-        name = event.data.get("name", "tool")
+        name = _resolve_tool_name(event.data)
         ok = event.data.get("ok", True)
-        summary = event.data.get("result_summary") or "completed"
+        summary = _resolve_tool_summary(event.data)
         status = "ok" if ok else "failed"
         return f"{prefix} Tool {status}: {name} - {summary}"
     if event.event in {"mission.completed", "mission.failed"}:
@@ -91,3 +91,28 @@ def _format_result(result: Any) -> str:
     if isinstance(result, str):
         return result
     return json.dumps(result, indent=2)
+
+
+def _resolve_tool_name(data: dict[str, Any]) -> str:
+    name = data.get("name")
+    if isinstance(name, str) and name:
+        return name
+    metadata = data.get("metadata")
+    if isinstance(metadata, dict):
+        meta_name = metadata.get("name")
+        if isinstance(meta_name, str) and meta_name:
+            return meta_name
+    return "tool"
+
+
+def _resolve_tool_summary(data: dict[str, Any]) -> str:
+    error_message = data.get("error_message")
+    if isinstance(error_message, str) and error_message:
+        error_type = data.get("error_type")
+        if isinstance(error_type, str) and error_type:
+            return f"{error_type}: {error_message}"
+        return error_message
+    summary = data.get("result_summary")
+    if isinstance(summary, str) and summary:
+        return summary
+    return "completed"

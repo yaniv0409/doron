@@ -22,6 +22,7 @@ class MissionRequest(BaseModel):
     mission_metadata: dict[str, Any] | None = None
     web_enabled: bool = True
     db_mutation_enabled: bool = True
+    web_tool_call_limit: int | None = Field(default=None, ge=0)
 
 
 class MissionError(BaseModel):
@@ -372,3 +373,39 @@ class ExecutionTrace(BaseModel):
     error: MissionError | None = None
     started_at: datetime
     completed_at: datetime
+
+
+class SessionTurn(BaseModel):
+    message_id: str
+    role: str
+    content: str
+    created_at: datetime = Field(default_factory=utc_now)
+    trace_id: str | None = None
+    status: str = "completed"
+    web_tool_call_limit_used: int | None = None
+
+
+class SessionSummary(BaseModel):
+    notes: list[str] = Field(default_factory=list)
+    recent_tools: list[str] = Field(default_factory=list)
+    compression_notice: str | None = None
+    last_trace_id: str | None = None
+
+
+class ResearchSession(BaseModel):
+    session_id: str
+    name: str
+    normalized_name: str
+    uses_dedicated_db: bool = False
+    db_path: str
+    preferred_model: str | None = None
+    allowed_models: list[str] | None = None
+    output_schema: dict[str, Any] | None = None
+    web_enabled: bool = True
+    db_mutation_enabled: bool = True
+    web_tool_call_limit: int | None = Field(default=None, ge=0)
+    turns: list[SessionTurn] = Field(default_factory=list)
+    summary: SessionSummary = Field(default_factory=SessionSummary)
+    last_error: MissionError | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)

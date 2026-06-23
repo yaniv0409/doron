@@ -34,6 +34,16 @@ class TraceSettings(BaseModel):
     checkpoint_directory: Path = Path("traces/checkpoints")
 
 
+class SessionSettings(BaseModel):
+    directory: Path = Path("sessions")
+    db_directory: Path = Path("dbs")
+    shared_db_path: Path = Path("dbs/shared.kuzu")
+    history_turn_limit: int = 12
+    summary_tool_limit: int = 12
+    graph_node_limit: int = 300
+    graph_edge_limit: int = 300
+
+
 class BrowserSettings(BaseModel):
     headless: bool = True
     default_timeout_ms: int = 20_000
@@ -102,6 +112,7 @@ class AppSettings(BaseModel):
     openrouter: OpenRouterSettings = Field(default_factory=OpenRouterSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     traces: TraceSettings = Field(default_factory=TraceSettings)
+    sessions: SessionSettings = Field(default_factory=SessionSettings)
     browser: BrowserSettings = Field(default_factory=BrowserSettings)
     docs: DocumentationSettings = Field(default_factory=DocumentationSettings)
     compression: CompressionSettings = Field(default_factory=CompressionSettings)

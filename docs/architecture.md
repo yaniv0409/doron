@@ -22,19 +22,20 @@ Core runtime:
 
 ## Runtime flow
 
-1. FastAPI accepts a mission request and can return blocking JSON or streamed SSE.
-2. `MissionService` builds a mission-scoped runtime.
-3. `AgentFactory` creates a `pydantic-ai` agent for the current model.
-4. The agent uses explicit tools for graph work, browser work, documentation lookup, and model switching.
-5. Structured output is validated against caller-provided JSON Schema.
-6. Logs and a normalized trace are written to disk.
-7. When enabled, the main mission enqueues a durable skill-maintenance job and a `MaintenanceRunner` resumes it from persisted state.
+1. FastAPI accepts either a low-level mission request or a named session request.
+2. Session requests load durable session JSON, resolve the shared or dedicated DB path, and build a mission prompt from recent chat plus stored summary.
+3. `MissionService` builds a mission-scoped runtime.
+4. `AgentFactory` creates a `pydantic-ai` agent for the current model.
+5. The agent uses explicit tools for graph work, browser work, documentation lookup, and model switching.
+6. Structured output is validated against caller-provided JSON Schema.
+7. Logs, session artifacts, and a normalized trace are written to disk.
+8. When enabled, the main mission enqueues a durable skill-maintenance job and a `MaintenanceRunner` resumes it from persisted state.
 
 ## Boundaries
 
 - `domain/`: pure types and exceptions
 - `contracts/`: API payloads and serialization
-- `application/`: mission flow and validation
+- `application/`: mission flow, session orchestration, graph snapshots, and validation
 - `agent/`: orchestration prompts and tool registration
-- `infrastructure/`: Kuzu, Playwright, OpenRouter, logging, traces, docs lookup, maintenance job storage
+- `infrastructure/`: Kuzu, Playwright, OpenRouter, logging, traces, docs lookup, maintenance job storage, session storage
 - `tools/`: short capability functions used by the agent

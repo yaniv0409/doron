@@ -52,9 +52,10 @@ def test_format_stream_event_and_final_response() -> None:
     event = MissionStreamEvent(
         event="tool.completed",
         data={
-            "name": "graph_schema",
-            "ok": True,
-            "result_summary": "schema returned",
+            "metadata": {"name": "graph_schema"},
+            "ok": False,
+            "error_type": "browser_runtime_error",
+            "error_message": "browser closed unexpectedly",
             "created_at": "2026-06-17T12:34:56Z",
         },
     )
@@ -68,7 +69,9 @@ def test_format_stream_event_and_final_response() -> None:
         completed_at=utc_now().isoformat(),
     )
 
-    assert "[12:34:56] Tool ok: graph_schema" in format_stream_event(event)
+    assert "[12:34:56] Tool failed: graph_schema - browser_runtime_error: browser closed unexpectedly" in format_stream_event(
+        event
+    )
     final_rendered = format_final_stream_response(response, ["graph_schema"])
     assert "Tools: graph_schema" in final_rendered
 

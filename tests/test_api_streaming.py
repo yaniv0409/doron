@@ -52,7 +52,19 @@ def test_run_mission_streams_progress_and_final_event() -> None:
                 event_hook({"event": "mission.started", "data": {"trace_id": "trace-1", "request": {"prompt": "hello"}, "model": "openai/gpt-4.1-mini"}})
                 event_hook({"event": "mission.progress", "data": {"trace_id": "trace-1", "phase": "agent_run_started", "message": "started", "metadata": {}}})
                 event_hook({"event": "tool.started", "data": {"trace_id": "trace-1", "name": "graph_schema", "arguments": {}}})
-                event_hook({"event": "tool.completed", "data": {"trace_id": "trace-1", "name": "graph_schema", "arguments": {}, "ok": True, "result_summary": "schema returned"}})
+                event_hook(
+                    {
+                        "event": "tool.completed",
+                        "data": {
+                            "trace_id": "trace-1",
+                            "name": "graph_schema",
+                            "arguments": {},
+                            "ok": False,
+                            "error_type": "browser_runtime_error",
+                            "error_message": "browser closed unexpectedly",
+                        },
+                    }
+                )
             return _build_result()
 
         app.state.mission_service.run = fake_run
@@ -78,6 +90,7 @@ def test_run_mission_streams_progress_and_final_event() -> None:
         "mission.completed",
     ]
     assert events[-1][1]["trace_id"] == "trace-1"
+    assert events[3][1]["error_message"] == "browser closed unexpectedly"
 
 
 def test_run_mission_blocking_json_remains_available() -> None:
