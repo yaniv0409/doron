@@ -13,23 +13,43 @@ except ImportError:  # pragma: no cover
 
 class KuzuGateway:
     def __init__(self, db_path: str, *, read_only: bool = False) -> None:
-        if kuzu is None:
-            raise DatabaseError("kuzu is not installed")
-        path = Path(db_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            self._db = kuzu.Database(str(path), read_only=read_only)
-        except Exception as exc:  # pragma: no cover
-            raise DatabaseError(str(exc)) from exc
-        self._connection = kuzu.Connection(self._db)
+        self._db_path = str(Path(db_path))
+        self._read_only = read_only
+        self._db: Any | None = None
+        self._connection: Any | None = None
+        self._ensure_open()
 
     def execute(self, query: str, parameters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        self._ensure_open()
         params = parameters or {}
         try:
             result = self._connection.execute(query, parameters=params)
         except Exception as exc:  # pragma: no cover
             raise DatabaseError(str(exc)) from exc
         return _normalize_result(result)
+
+    def sync(self) -> None:
+        self.close()
+        self._ensure_open()
+
+    def close(self) -> None:
+        connection = self._connection
+        db = self._db
+        self._connection = None
+        self._db = None
+        errors: list[Exception] = []
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception as exc:  # pragma: no cover
+                errors.append(exc)
+        if db is not None:
+            try:
+                db.close()
+            except Exception as exc:  # pragma: no cover
+                errors.append(exc)
+        if errors:
+            raise DatabaseError(str(errors[0]))
 
     def get_schema(self) -> str:
         statements = self.show_tables()
@@ -71,6 +91,21 @@ class KuzuGateway:
         else:
             query = f"MATCH (n:{table_name}) RETURN n LIMIT {limit};"
         return self.execute(query)
+
+    def _ensure_open(self) -> None:
+        if self._db is not None and self._connection is not None:
+            return
+        if kuzu is None:
+            raise DatabaseError("kuzu is not installed")
+        path = Path(self._db_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self._db = kuzu.Database(str(path), read_only=self._read_only)
+            self._connection = kuzu.Connection(self._db)
+        except Exception as exc:  # pragma: no cover
+            self._db = None
+            self._connection = None
+            raise DatabaseError(str(exc)) from exc
 
 
 def _normalize_result(result: Any) -> list[dict[str, Any]]:

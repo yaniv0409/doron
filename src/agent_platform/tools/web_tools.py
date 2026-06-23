@@ -7,10 +7,17 @@ from typing import Any
 from agent_platform.application.live_events import emit_runtime_event
 from agent_platform.application.runtime_builder import MissionRuntime
 from agent_platform.domain.exceptions import BrowserError, ContextRefreshRequested, ModelSwitchRequested
-from agent_platform.domain.models import ToolResult, WebArtifact, WebFetchBatchResult, WebFetchResult
+from agent_platform.domain.models import ToolResult, WebArtifact, WebFetchBatchResult, WebFetchResult, WebSearchHit, WebSearchResponse
 from agent_platform.infrastructure.browser import PlaywrightBrowserEngine
 from agent_platform.tools.compression_tools import maybe_auto_compress
 from agent_platform.tools.result_utils import build_tool_call, error_result, success_result
+
+try:
+    from ddgs import DDGS
+except ImportError:  # pragma: no cover
+    DDGS = None
+
+_DEFAULT_WEB_SEARCH_RESULT_LIMIT = 5
 
 
 async def open_url(runtime: MissionRuntime, urls: list[str], reason: str) -> ToolResult:
@@ -246,6 +253,73 @@ async def get_page_text(runtime: MissionRuntime, reason: str) -> ToolResult:
     )
 
 
+async def web_search(runtime: MissionRuntime, query: str, reason: str) -> ToolResult:
+    if DDGS is None:
+        result = error_result(
+            "web_search",
+            "duckduckgo_search_unavailable",
+            "DuckDuckGo search support is not installed",
+            'Install the `ddgs` package or the `duckduckgo` optional group.',
+        )
+        _record_web_search_failure(runtime, query, reason, result)
+        return result
+
+    arguments = {"query": query, "reason": reason}
+    runtime.context.tool_summaries.append(f"web_search | reason: {reason}")
+    emit_runtime_event(
+        runtime.context,
+        "web_search_started",
+        "web search started",
+        {
+            "query": query,
+            "reason": reason,
+        },
+    )
+    try:
+        raw_results = await asyncio.to_thread(_duckduckgo_search, query, _DEFAULT_WEB_SEARCH_RESULT_LIMIT)
+    except Exception as exc:  # pragma: no cover
+        if _is_control_flow_exception(exc):
+            raise
+        result = error_result(
+            "web_search",
+            "web_search_error",
+            str(exc),
+            "Try a narrower query or continue with browser tools if a specific page is already known.",
+        )
+        _record_web_search_failure(runtime, query, reason, result)
+        return result
+
+    hits = [
+        WebSearchHit(
+            title=item["title"],
+            url=item["href"],
+            snippet=_normalize_search_snippet(item["body"]),
+        )
+        for item in raw_results
+    ]
+    response = WebSearchResponse(query=query, reason=reason, hits=hits)
+    runtime.context.tool_calls.append(
+        build_tool_call(
+            "web_search",
+            arguments,
+            result_summary=f"returned {len(hits)} web result(s)",
+            reason=reason,
+        )
+    )
+    emit_runtime_event(
+        runtime.context,
+        "web_search_completed",
+        "web search completed",
+        {
+            "query": query,
+            "reason": reason,
+            "result_count": len(hits),
+            "top_result": hits[0].model_dump(mode="json") if hits else None,
+        },
+    )
+    return success_result("web_search", response.model_dump(mode="json"))
+
+
 def _reserve_web_tool_call(
     runtime: MissionRuntime,
     tool_name: str,
@@ -416,6 +490,31 @@ def _record_browser_text_failure(runtime: MissionRuntime, reason: str, result: T
         )
     )
     runtime.context.tool_summaries.append(f"get_page_text failed | reason: {reason}")
+
+
+def _record_web_search_failure(runtime: MissionRuntime, query: str, reason: str, result: ToolResult) -> None:
+    runtime.context.tool_calls.append(
+        build_tool_call(
+            "web_search",
+            {"query": query, "reason": reason},
+            result_summary=result.error_message or "web search failed",
+            reason=reason,
+            ok=False,
+            error_type=result.error_type,
+            error_message=result.error_message,
+        )
+    )
+    runtime.context.tool_summaries.append(f"web_search failed | reason: {reason}")
+
+
+def _normalize_search_snippet(text: str) -> str:
+    cleaned = " ".join(text.split())
+    return cleaned[:240]
+
+
+def _duckduckgo_search(query: str, max_results: int | None) -> list[dict[str, Any]]:
+    client = DDGS()
+    return client.text(query, max_results=max_results)
 
 
 def _is_control_flow_exception(exc: Exception) -> bool:

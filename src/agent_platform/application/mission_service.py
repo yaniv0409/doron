@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import asyncio
 import json
+from contextlib import suppress
 from typing import Any
 
 from agent_platform.agent.factory import AgentFactory
@@ -177,6 +178,11 @@ class MissionService:
         except Exception as exc:  # pragma: no cover
             result = await self._fail(runtime, model_sequence, "unexpected_error", str(exc))
             return result
+        finally:
+            with suppress(Exception):
+                await runtime.browser.close()
+            with suppress(Exception):
+                runtime.db.close()
 
     async def _run_once(self, runtime: MissionRuntime, prompt: str) -> Any:
         session = self._agent_factory.create(runtime)

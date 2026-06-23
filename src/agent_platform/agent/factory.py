@@ -23,17 +23,15 @@ from agent_platform.tools.memory_tools import (
     skill_write as run_skill_write,
 )
 from agent_platform.tools.model_tools import request_model_switch
-from agent_platform.tools.web_tools import get_page_text, open_url
+from agent_platform.tools.web_tools import get_page_text, open_url, web_search as run_web_search
 
 try:
     from pydantic_ai import Agent, RunContext
-    from pydantic_ai.capabilities import WebSearch
     from pydantic_ai.models.openrouter import OpenRouterModel
     from pydantic_ai.providers.openrouter import OpenRouterProvider
 except ImportError:  # pragma: no cover
     Agent = None
     RunContext = Any
-    WebSearch = None
     OpenRouterModel = None
     OpenRouterProvider = None
 
@@ -65,10 +63,6 @@ class AgentFactory:
         output_type = build_output_type(runtime.context.mission_request.output_schema)
         if output_type is not None:
             agent_kwargs["output_type"] = output_type
-        if runtime.context.mission_request.web_enabled:
-            if WebSearch is None:
-                raise ConfigurationError("pydantic-ai web search support is not installed")
-            agent_kwargs["capabilities"] = [WebSearch(local="duckduckgo")]
         agent = Agent(model, **agent_kwargs)
         tool_names = self._register_tools(agent, runtime)
         return AgentSession(runtime=runtime, agent=agent, tool_names=tool_names)
@@ -78,6 +72,15 @@ class AgentFactory:
         is_skill_maintenance = runtime.context.mission_request.mission_metadata.get("mission_kind") == "skill_maintenance" if runtime.context.mission_request.mission_metadata else False
         if runtime.context.mission_request.web_enabled:
             tool_names.append("web_search")
+
+            @agent.tool
+            async def web_search(ctx: RunContext[MissionRuntime], query: str, reason: str) -> ToolResult:
+                """Search the public web for a query and return a compact list of results."""
+                arguments = {"query": query, "reason": reason}
+                self._emit_tool_started(ctx.deps, "web_search", arguments)
+                result = await run_web_search(ctx.deps, query, reason)
+                self._emit_tool_completed(ctx.deps, "web_search", arguments, result)
+                return result
 
         if runtime.services.settings.memory.enabled:
             @agent.tool
@@ -303,6 +306,7 @@ class AgentFactory:
             f"{name} started",
             {"name": name, "arguments": arguments},
             stream_event="tool.started",
+            payload={"name": name, "parameters": arguments},
         )
 
     def _emit_tool_completed(
@@ -322,10 +326,7 @@ class AgentFactory:
             result_ok = result.ok if result_ok is None else result_ok
             error_type = error_type or result.error_type
             error_message = error_message or result.error_message
-            if result.ok:
-                result_summary = self._summarize_value(result.data)
-            else:
-                result_summary = result.retry_hint or result.error_message or name
+            result_summary = self._summarize_tool_result(name, result)
         elif isinstance(result, str):
             result_summary = result
             result_ok = True if result_ok is None else result_ok
@@ -345,7 +346,24 @@ class AgentFactory:
                 "error_message": error_message,
             },
             stream_event="tool.completed",
+            payload={
+                "name": name,
+                "parameters": arguments,
+                "ok": result_ok,
+                "result_summary": result_summary,
+                "error_type": error_type,
+                "error_message": error_message,
+            },
         )
+
+    def _summarize_tool_result(self, name: str, result: ToolResult) -> str:
+        if not result.ok:
+            return result.retry_hint or result.error_message or name
+        if name == "web_search" and isinstance(result.data, dict):
+            hits = result.data.get("hits")
+            if isinstance(hits, list):
+                return f"returned {len(hits)} web result(s)"
+        return self._summarize_value(result.data)
 
     def _summarize_value(self, value: Any) -> str:
         if value is None:

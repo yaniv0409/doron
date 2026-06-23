@@ -51,7 +51,7 @@ def test_run_mission_streams_progress_and_final_event() -> None:
             if event_hook is not None:
                 event_hook({"event": "mission.started", "data": {"trace_id": "trace-1", "request": {"prompt": "hello"}, "model": "openai/gpt-4.1-mini"}})
                 event_hook({"event": "mission.progress", "data": {"trace_id": "trace-1", "phase": "agent_run_started", "message": "started", "metadata": {}}})
-                event_hook({"event": "tool.started", "data": {"trace_id": "trace-1", "name": "graph_schema", "arguments": {}}})
+                event_hook({"event": "tool.started", "data": {"trace_id": "trace-1", "name": "graph_schema", "arguments": {}, "parameters": {"query": "inspect schema", "reason": "understand the graph"}}})
                 event_hook(
                     {
                         "event": "tool.completed",
@@ -59,6 +59,7 @@ def test_run_mission_streams_progress_and_final_event() -> None:
                             "trace_id": "trace-1",
                             "name": "graph_schema",
                             "arguments": {},
+                            "parameters": {"query": "inspect schema", "reason": "understand the graph"},
                             "ok": False,
                             "error_type": "browser_runtime_error",
                             "error_message": "browser closed unexpectedly",

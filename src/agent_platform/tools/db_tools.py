@@ -114,6 +114,42 @@ async def write_graph(
             f"write_graph failed: {query[:160]} | reason: {reason}",
         )
         return result
+    try:
+        runtime.db.sync()
+    except DatabaseError as exc:
+        result = error_result(
+            "write_graph",
+            classify_database_error(str(exc)),
+            str(exc),
+            "Retry the mutation after inspecting the schema and verify the database path is writable.",
+        )
+        _record_database_tool_failure(
+            runtime,
+            "write_graph",
+            {"query": query, "parameters": parameters or {}, "reason": reason},
+            reason,
+            result,
+            f"write_graph sync failed: {query[:160]} | reason: {reason}",
+        )
+        return result
+    except Exception as exc:  # pragma: no cover
+        if _is_control_flow_exception(exc):
+            raise
+        result = error_result(
+            "write_graph",
+            "database_runtime_error",
+            str(exc),
+            "Retry the mutation after inspecting the schema and verify the database path is writable.",
+        )
+        _record_database_tool_failure(
+            runtime,
+            "write_graph",
+            {"query": query, "parameters": parameters or {}, "reason": reason},
+            reason,
+            result,
+            f"write_graph sync failed: {query[:160]} | reason: {reason}",
+        )
+        return result
     summary = f"mutation executed, returned {len(rows)} row(s)"
     runtime.context.db_mutations.append(
         DbMutationRecord(

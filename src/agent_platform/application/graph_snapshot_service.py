@@ -27,14 +27,14 @@ class GraphSnapshotService:
                 edges=[],
             )
         node_map: dict[str, GraphNodeResponse] = {}
-        edges: list[GraphEdgeResponse] = []
+        edge_map: dict[str, GraphEdgeResponse] = {}
 
         for table in tables:
             name = str(table.get("name", ""))
             kind = str(table.get("type", ""))
-            rows = gateway.sample_rows(name, kind=kind, limit=self._row_limit(kind))
+            rows = self._load_rows(gateway, name, kind)
             if kind == "REL":
-                self._collect_relationship_rows(rows, name, node_map, edges)
+                self._collect_relationship_rows(rows, name, node_map, edge_map)
             else:
                 self._collect_node_rows(rows, name, node_map)
 
@@ -43,13 +43,17 @@ class GraphSnapshotService:
             db_path=db_path,
             generated_at=utc_now().isoformat(),
             node_count=len(node_map),
-            edge_count=len(edges),
+            edge_count=len(edge_map),
             nodes=list(node_map.values()),
-            edges=edges,
+            edges=list(edge_map.values()),
         )
 
-    def _row_limit(self, kind: str) -> int:
-        return self._settings.graph_edge_limit if kind == "REL" else self._settings.graph_node_limit
+    def _load_rows(self, gateway: KuzuGateway, table_name: str, kind: str) -> list[dict[str, Any]]:
+        if not table_name:
+            return []
+        if kind == "REL":
+            return gateway.execute(f"MATCH (a)-[r:{_quote_identifier(table_name)}]->(b) RETURN a, r, b;")
+        return gateway.execute(f"MATCH (n:{_quote_identifier(table_name)}) RETURN n;")
 
     def _collect_node_rows(
         self,
@@ -57,7 +61,7 @@ class GraphSnapshotService:
         table_name: str,
         node_map: dict[str, GraphNodeResponse],
     ) -> None:
-        for row in rows[: self._settings.graph_node_limit]:
+        for row in rows:
             node = row.get("n")
             response = self._node_from_value(node, table_name)
             node_map[response.id] = response
@@ -67,14 +71,15 @@ class GraphSnapshotService:
         rows: list[dict[str, Any]],
         table_name: str,
         node_map: dict[str, GraphNodeResponse],
-        edges: list[GraphEdgeResponse],
+        edge_map: dict[str, GraphEdgeResponse],
     ) -> None:
-        for row in rows[: self._settings.graph_edge_limit]:
+        for row in rows:
             source = self._node_from_value(row.get("a"), "source")
             target = self._node_from_value(row.get("b"), "target")
             node_map[source.id] = source
             node_map[target.id] = target
-            edges.append(self._edge_from_value(row.get("r"), table_name, source.id, target.id))
+            edge = self._edge_from_value(row.get("r"), table_name, source.id, target.id)
+            edge_map[edge.id] = edge
 
     def _node_from_value(self, value: Any, fallback_label: str) -> GraphNodeResponse:
         attrs = _object_attrs(value)
@@ -117,6 +122,10 @@ class GraphSnapshotService:
             target=target,
             properties=properties,
         )
+
+
+def _quote_identifier(name: str) -> str:
+    return f"`{name.replace('`', '``')}`"
 
 
 def _object_attrs(value: Any) -> dict[str, Any]:

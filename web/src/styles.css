@@ -195,6 +195,73 @@ button:disabled {
   border-bottom: 1px solid rgba(19, 34, 56, 0.08);
 }
 
+.activity-item {
+  margin-bottom: 10px;
+  border-bottom: 1px solid rgba(19, 34, 56, 0.08);
+}
+
+.activity-item summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.activity-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.activity-summary {
+  font-weight: 600;
+}
+
+.activity-status {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: rgba(32, 48, 71, 0.08);
+  color: #203047;
+}
+
+.activity-item.failed .activity-status {
+  background: rgba(201, 74, 74, 0.14);
+  color: #7b1f1f;
+}
+
+.activity-item.ok .activity-status,
+.activity-item.started .activity-status {
+  background: rgba(67, 170, 139, 0.14);
+  color: #1e5f4e;
+}
+
+.activity-panel {
+  padding: 0 0 10px 14px;
+  border-left: 2px solid rgba(32, 48, 71, 0.14);
+}
+
+.activity-panel-heading {
+  margin: 8px 0 6px;
+  color: #46627f;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.activity-panel pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(19, 34, 56, 0.08);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
 .composer textarea {
   resize: vertical;
   min-height: 140px;

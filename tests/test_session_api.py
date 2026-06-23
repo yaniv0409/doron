@@ -51,11 +51,26 @@ class FakeMissionService:
         trace_id = f"trace-{len(self.requests)}"
         if event_hook is not None:
             event_hook({"event": "mission.started", "data": {"trace_id": trace_id, "model": "openai/gpt-4.1-mini"}})
-            event_hook({"event": "tool.started", "data": {"trace_id": trace_id, "name": "browser_open"}})
+            event_hook(
+                {
+                    "event": "tool.started",
+                    "data": {
+                        "trace_id": trace_id,
+                        "name": "browser_open",
+                        "parameters": {"urls": ["https://example.com"], "reason": "research"},
+                    },
+                }
+            )
             event_hook(
                 {
                     "event": "tool.completed",
-                    "data": {"trace_id": trace_id, "name": "browser_open", "ok": True, "result_summary": "opened"},
+                    "data": {
+                        "trace_id": trace_id,
+                        "name": "browser_open",
+                        "parameters": {"urls": ["https://example.com"], "reason": "research"},
+                        "ok": True,
+                        "result_summary": "opened",
+                    },
                 }
             )
         return MissionResult(

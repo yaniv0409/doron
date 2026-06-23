@@ -12,6 +12,7 @@ def emit_runtime_event(
     metadata: dict[str, Any] | None = None,
     *,
     stream_event: str = "mission.progress",
+    payload: dict[str, Any] | None = None,
 ) -> RuntimeEvent:
     event = RuntimeEvent(
         phase=phase,
@@ -30,18 +31,20 @@ def emit_runtime_event(
     event_hook = getattr(context, "event_hook", None)
     if event_hook is not None:
         trace_id = getattr(context, "trace_id", None)
-        payload = {
+        event_data = {
             "phase": phase,
             "message": message,
             "metadata": metadata or {},
             "created_at": utc_now().isoformat(),
         }
+        if payload is not None:
+            event_data.update(payload)
         if trace_id is not None:
-            payload["trace_id"] = trace_id
+            event_data["trace_id"] = trace_id
         event_hook(
             {
                 "event": stream_event,
-                "data": payload,
+                "data": event_data,
             }
         )
     return event

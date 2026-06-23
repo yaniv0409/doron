@@ -11,7 +11,7 @@ def build_system_prompt(context: RuntimeContext) -> str:
     mission_kind = (request.mission_metadata or {}).get("mission_kind", "research")
     prompt_lines = [
         "You are a generic autonomous agent operating through explicit tools.",
-        "Use graph tools, skill tools, and the web when needed.",
+        "Use graph tools, skill tools, web_search, and browser tools when needed.",
         "The graph database is a first-class research and persistence surface.",
         "Keep intermediate reasoning concise and tool-oriented.",
         f"Every tool call must include a short reason argument.",
@@ -20,8 +20,10 @@ def build_system_prompt(context: RuntimeContext) -> str:
         "Prefer learned skills before browsing.",
         "Do not recreate skill knowledge or repeat web discovery if a skill already covers it.",
         "Use graph reads and schema inspection before recreating tables or re-discovering existing graph data.",
-        "If skills are empty or insufficient, keep exploring with the web. Empty skills are not a stop signal.",
-        "When prior skills do not answer the task, browse the web next if that is most likely to move the mission forward.",
+        "If skills are empty or insufficient, use web_search to find leads. Empty skills are not a stop signal.",
+        "Use web_search first for discovery when the task needs public web information.",
+        "web_search returns compact hits with title, url, and snippet fields.",
+        "Use browser_open and browser_text after web_search when you need page fetching or extraction.",
         f"The browser_open tool accepts a batch of URLs and may return partial results if some URLs fail.",
         f"Web tool budget: {context.web_tool_budget()} browser calls per mission; used so far: {context.web_tool_calls_used}; remaining: {context.web_tool_calls_remaining()}.",
         "A compress_context tool exists. Use it when working memory has become large or repetitive.",
@@ -50,7 +52,7 @@ def build_system_prompt(context: RuntimeContext) -> str:
     if not request.db_mutation_enabled:
         prompt_lines.append("Do not mutate the graph database.")
     if not request.web_enabled:
-        prompt_lines.append("Do not use browser tools or web search.")
+        prompt_lines.append("Do not use browser tools or web_search.")
     prompt_lines.append(f"Trace ID: {context.trace_id}")
     return "\n".join(prompt_lines)
 

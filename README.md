@@ -5,7 +5,7 @@ Generic agent platform scaffold built around:
 - `pydantic-ai` for orchestration
 - Kuzu for graph persistence
 - Playwright for web automation
-- Pydantic AI web search with a DuckDuckGo local fallback
+- a visible `web_search` tool backed by DuckDuckGo
 - OpenRouter for model and embedding access
 
 Research workspace features:
@@ -23,6 +23,7 @@ Web extraction behavior:
 - browser context configured to look like a normal desktop session
 - cleaned readable page text without HTML tags
 - structured extracted links from the rendered page
+- visible `web_search(query, reason)` discovery tool with compact search hits
 - batch `browser_open(urls)` fetches multiple URLs in parallel with a configurable worker pool
 - batch results preserve input order and may contain partial failures
 - browser tools are capped at 20 calls per mission by default, and every tool call carries a reason
@@ -146,6 +147,21 @@ By default the frontend calls `http://127.0.0.1:8000`. Override with:
 ```bash
 VITE_API_BASE_URL=http://127.0.0.1:8000 npm run dev
 ```
+
+To start both the backend and the frontend together from the repo root:
+
+```bash
+./scripts/dev.sh
+```
+
+Optional overrides:
+
+- `BACKEND_HOST=127.0.0.1`
+- `BACKEND_PORT=8000`
+- `FRONTEND_HOST=127.0.0.1`
+- `FRONTEND_PORT=5173`
+- `PYTHON_BIN=/path/to/python`
+- `VITE_API_BASE_URL=http://127.0.0.1:8000`
 
 ## Terminal chat
 

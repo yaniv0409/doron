@@ -97,6 +97,19 @@ class PageLink(BaseModel):
     title: str | None = None
 
 
+class WebSearchHit(BaseModel):
+    title: str
+    url: str
+    snippet: str
+
+
+class WebSearchResponse(BaseModel):
+    query: str
+    reason: str
+    source: str = "duckduckgo"
+    hits: list[WebSearchHit] = Field(default_factory=list)
+
+
 class WebArtifact(BaseModel):
     url: str
     title: str | None = None

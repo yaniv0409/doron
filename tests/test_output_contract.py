@@ -123,7 +123,7 @@ def test_agent_factory_passes_structured_output_type() -> None:
     assert validated.model_dump(mode="json") == {"answer": "ok"}
 
 
-def test_agent_factory_enables_duckduckgo_web_search() -> None:
+def test_agent_factory_registers_visible_web_search() -> None:
     settings = AppSettings()
     settings.openrouter.api_key = "test-key"
     runtime = _build_runtime_wrapper(
@@ -140,39 +140,32 @@ def test_agent_factory_enables_duckduckgo_web_search() -> None:
             self.name = name
             self.provider = provider
 
-    class FakeWebSearch:
-        def __init__(self, *, local: str) -> None:
-            self.local = local
-
     class FakeAgent:
         def __init__(self, model, **kwargs) -> None:
             self.model = model
             self.kwargs = kwargs
+            self.tools: dict[str, object] = {}
 
         def tool(self, fn):
+            self.tools[fn.__name__] = fn
             return fn
 
     original_agent = factory_module.Agent
     original_model = factory_module.OpenRouterModel
     original_provider = factory_module.OpenRouterProvider
-    original_web_search = factory_module.WebSearch
     try:
         factory_module.Agent = FakeAgent
         factory_module.OpenRouterModel = FakeModel
         factory_module.OpenRouterProvider = FakeProvider
-        factory_module.WebSearch = FakeWebSearch
         session = AgentFactory().create(runtime)
     finally:
         factory_module.Agent = original_agent
         factory_module.OpenRouterModel = original_model
         factory_module.OpenRouterProvider = original_provider
-        factory_module.WebSearch = original_web_search
 
     assert "web_search" in session.tool_names
-    capabilities = session.agent.kwargs["capabilities"]
-    assert len(capabilities) == 1
-    assert isinstance(capabilities[0], FakeWebSearch)
-    assert capabilities[0].local == "duckduckgo"
+    assert "web_search" in session.agent.tools
+    assert "capabilities" not in session.agent.kwargs
 
 
 def test_agent_factory_registers_skill_tools_for_maintenance_only() -> None:

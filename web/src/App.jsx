@@ -56,6 +56,15 @@ export default function App() {
     setError("");
   }
 
+  async function refreshGraph(sessionId) {
+    const response = await fetch(`${API_BASE}/sessions/${sessionId}/graph`);
+    if (!response.ok) {
+      return;
+    }
+    const payload = await response.json();
+    setGraph(payload);
+  }
+
   async function openSession(event) {
     event.preventDefault();
     setError("");
@@ -130,9 +139,12 @@ export default function App() {
   }
 
   function handleStreamEvent(eventName, payload) {
-    setActivity((items) => [...items, formatActivity(eventName, payload)]);
+    setActivity((items) => [...items, buildActivityEntry(eventName, payload)]);
     if (eventName === "session.message.failed") {
       setError(readError(payload));
+    }
+    if (eventName === "session.graph.updated" && payload.session_id) {
+      void refreshGraph(payload.session_id);
     }
   }
 
@@ -226,11 +238,30 @@ export default function App() {
           <div className="activity card">
             <h3>Live activity</h3>
             <div className="activity-log">
-              {activity.map((item, index) => (
-                <div className="activity-line" key={`${index}-${item}`}>
-                  {item}
-                </div>
-              ))}
+              {activity.map((item) =>
+                item.kind === "tool" ? (
+                  <details className={`activity-item tool ${item.status}`} key={item.id}>
+                    <summary>
+                      <span className="activity-summary">{item.summary}</span>
+                      <span className="activity-status">{item.statusLabel}</span>
+                    </summary>
+                    <div className="activity-panel">
+                      <div className="activity-panel-heading">Parameters</div>
+                      <pre>{formatJson(item.parameters)}</pre>
+                      {item.reason ? (
+                        <>
+                          <div className="activity-panel-heading">Reason</div>
+                          <pre>{item.reason}</pre>
+                        </>
+                      ) : null}
+                    </div>
+                  </details>
+                ) : (
+                  <div className="activity-line" key={item.id}>
+                    {item.text}
+                  </div>
+                ),
+              )}
             </div>
           </div>
 
@@ -320,26 +351,43 @@ function parseSseEvent(block) {
   return { event, data: JSON.parse(data.join("\n")) };
 }
 
-function formatActivity(eventName, payload) {
+function buildActivityEntry(eventName, payload) {
+  const id = `${eventName}-${payload.created_at || payload.trace_id || payload.message_id || cryptoRandomId()}`;
   if (eventName === "tool.started") {
-    return `Tool started: ${resolveToolName(payload)}`;
+    return {
+      id,
+      kind: "tool",
+      status: "started",
+      statusLabel: "started",
+      summary: `Tool started: ${resolveToolName(payload)}`,
+      parameters: resolveToolParameters(payload),
+    };
   }
   if (eventName === "tool.completed") {
-    return `Tool ${payload.ok ? "ok" : "failed"}: ${resolveToolName(payload)} - ${resolveToolSummary(payload)}`;
+    const status = payload.ok ? "ok" : "failed";
+    return {
+      id,
+      kind: "tool",
+      status,
+      statusLabel: status,
+      summary: `Tool ${status}: ${resolveToolName(payload)} - ${resolveToolSummary(payload)}`,
+      parameters: resolveToolParameters(payload),
+      reason: resolveToolReason(payload),
+    };
   }
   if (eventName === "mission.started") {
-    return `Mission started: ${payload.trace_id}`;
+    return { id, kind: "text", text: `Mission started: ${payload.trace_id}` };
   }
   if (eventName === "mission.progress") {
-    return `Progress: ${payload.phase || "update"} ${payload.message || ""}`.trim();
+    return { id, kind: "text", text: `Progress: ${payload.phase || "update"} ${payload.message || ""}`.trim() };
   }
   if (eventName === "session.message.completed") {
-    return "Assistant reply completed.";
+    return { id, kind: "text", text: "Assistant reply completed." };
   }
   if (eventName === "session.graph.updated") {
-    return "Graph snapshot refreshed.";
+    return { id, kind: "text", text: "Graph snapshot refreshed." };
   }
-  return eventName;
+  return { id, kind: "text", text: eventName };
 }
 
 function readError(payload) {
@@ -372,6 +420,29 @@ function resolveToolName(payload) {
   return "tool";
 }
 
+function resolveToolParameters(payload) {
+  if (payload?.parameters && typeof payload.parameters === "object") {
+    return payload.parameters;
+  }
+  if (payload?.metadata?.arguments && typeof payload.metadata.arguments === "object") {
+    return payload.metadata.arguments;
+  }
+  if (payload?.arguments && typeof payload.arguments === "object") {
+    return payload.arguments;
+  }
+  return null;
+}
+
+function resolveToolReason(payload) {
+  if (typeof payload?.error_message === "string" && payload.error_message) {
+    if (typeof payload?.error_type === "string" && payload.error_type) {
+      return `${payload.error_type}: ${payload.error_message}`;
+    }
+    return payload.error_message;
+  }
+  return null;
+}
+
 function resolveToolSummary(payload) {
   if (typeof payload?.error_message === "string" && payload.error_message) {
     if (typeof payload?.error_type === "string" && payload.error_type) {
@@ -383,4 +454,18 @@ function resolveToolSummary(payload) {
     return payload.result_summary;
   }
   return "completed";
+}
+
+function formatJson(value) {
+  if (value === null || value === undefined) {
+    return "none";
+  }
+  return JSON.stringify(value, null, 2);
+}
+
+function cryptoRandomId() {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
