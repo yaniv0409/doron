@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from agent_platform.application.mission_service import MissionService
 from agent_platform.config.settings import AppSettings
 from agent_platform.domain.exceptions import ModelError
-from agent_platform.domain.models import ModelDescriptor, MissionRequest, RuntimeContext, utc_now
+from agent_platform.domain.models import CompletionMetadata, ModelDescriptor, MissionRequest, RuntimeContext, utc_now
 
 
 class HangingAgent:
@@ -213,6 +213,59 @@ def test_mission_service_does_not_compress_on_other_model_errors(tmp_path: Path)
     assert len(prompts) == 1
     assert context.compressed_memory is None
     assert not context.compression_events
+
+
+def test_mission_service_continues_when_finish_reason_is_length(tmp_path: Path) -> None:
+    settings = AppSettings()
+    settings.memory.enabled = False
+    settings.memory.maintenance_enabled = False
+    settings.traces.directory = tmp_path / "traces"
+    settings.traces.checkpoint_directory = tmp_path / "checkpoints"
+    service = MissionService(settings)
+    service._runtime_builder.services.trace_store = FakeTraceStore()
+    service._runtime_builder.services.chat_client = FakeChatClient()
+    service._runtime_builder.services.model_catalog = SimpleNamespace(
+        strongest_allowed=lambda allowed: allowed[-1],
+    )
+
+    request = MissionRequest(prompt="hello", db_path="/tmp/db.kuzu")
+    current_model = ModelDescriptor(name="openai/gpt-4.1-mini", rank=10, context_window=4000)
+    stronger_model = ModelDescriptor(name="openai/gpt-5.2", rank=100, context_window=32000)
+    context = RuntimeContext(
+        trace_id="trace-length",
+        mission_request=request,
+        started_at=utc_now(),
+        current_model=current_model,
+        allowed_models=[current_model, stronger_model],
+    )
+    runtime = SimpleNamespace(
+        context=context,
+        db=SimpleNamespace(),
+        browser=SimpleNamespace(close=lambda: asyncio.sleep(0)),
+        services=service._runtime_builder.services,
+    )
+    service._runtime_builder.build = lambda _: runtime
+
+    prompts: list[str] = []
+
+    async def fake_run_once(runtime, prompt: str):
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return "partial answer", CompletionMetadata(finish_reason="length", usage={"output_tokens": 100})
+        return "final answer", CompletionMetadata(finish_reason="stop", usage={"output_tokens": 20})
+
+    service._run_once = fake_run_once
+
+    result = asyncio.run(service.run(request))
+
+    assert result.status.value == "completed"
+    assert result.result == "final answer"
+    assert result.completion is not None
+    assert result.completion.finish_reason == "stop"
+    assert len(prompts) == 2
+    assert prompts[0] == "hello"
+    assert "finish_reason=length" in prompts[1]
+    assert "Previous partial answer:" in prompts[1]
 
 
 def test_skill_maintenance_run_attaches_parent_trace(tmp_path: Path) -> None:

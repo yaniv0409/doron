@@ -18,5 +18,6 @@ def to_api_response(result: MissionResult) -> MissionRunResponse:
         trace_id=result.trace_id,
         started_at=result.started_at.isoformat(),
         completed_at=result.completed_at.isoformat(),
+        completion=result.completion,
         error=error,
     )

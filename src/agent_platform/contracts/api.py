@@ -3,6 +3,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from agent_platform.domain.enums import MissionStatus, ResultFormat
+from agent_platform.domain.models import CompletionMetadata
 
 
 class MissionRunRequest(BaseModel):
@@ -32,6 +33,7 @@ class MissionRunResponse(BaseModel):
     trace_id: str
     started_at: str
     completed_at: str
+    completion: CompletionMetadata | None = None
     error: MissionRunError | None = None
 
 

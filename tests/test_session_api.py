@@ -11,7 +11,7 @@ from agent_platform.application.session_service import SessionService
 from agent_platform.config.settings import AppSettings, SessionSettings
 from agent_platform.contracts.session import SessionChatRequest, SessionGraphResponse, SessionOpenRequest, SessionUpdateRequest
 from agent_platform.domain.enums import MissionStatus, ResultFormat
-from agent_platform.domain.models import CompressionEvent, ExecutionTrace, MissionRequest, MissionResult, utc_now
+from agent_platform.domain.models import CompressionEvent, CompletionMetadata, ExecutionTrace, MissionRequest, MissionResult, utc_now
 from agent_platform.infrastructure.session_store import SessionStore
 
 
@@ -81,6 +81,7 @@ class FakeMissionService:
             trace_id=trace_id,
             started_at=utc_now(),
             completed_at=utc_now(),
+            completion=CompletionMetadata(finish_reason="stop", usage={"output_tokens": 11}),
         )
 
 
@@ -148,7 +149,7 @@ def test_session_chat_persists_and_uses_web_limit(tmp_path: Path) -> None:
     service = SessionService(settings, mission_service, SessionStore(settings.sessions))
     session = service.open(SessionOpenRequest(name="Session A", web_tool_call_limit=3))
 
-    updated, trace_id, assistant_message, error, web_limit = asyncio.run(
+    updated, trace_id, assistant_message, error, web_limit, completion = asyncio.run(
         service.run_chat(session.session_id, SessionChatRequest(message="Research NVIDIA", web_tool_call_limit=7))
     )
 
@@ -156,6 +157,8 @@ def test_session_chat_persists_and_uses_web_limit(tmp_path: Path) -> None:
     assert assistant_message == "assistant reply"
     assert error is None
     assert web_limit == 7
+    assert completion is not None
+    assert completion.finish_reason == "stop"
     assert mission_service.requests[0].web_tool_call_limit == 7
     assert len(updated.turns) == 2
     assert updated.summary.last_trace_id == "trace-1"

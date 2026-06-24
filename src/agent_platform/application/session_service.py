@@ -9,7 +9,7 @@ from typing import Any, Callable
 from agent_platform.application.mission_service import MissionService
 from agent_platform.config.settings import AppSettings
 from agent_platform.contracts.session import SessionChatRequest, SessionOpenRequest, SessionUpdateRequest
-from agent_platform.domain.models import ExecutionTrace, MissionError, MissionRequest, ResearchSession, SessionSummary, SessionTurn, utc_now
+from agent_platform.domain.models import CompletionMetadata, ExecutionTrace, MissionError, MissionRequest, ResearchSession, SessionSummary, SessionTurn, utc_now
 from agent_platform.infrastructure.kuzu_client import KuzuGateway
 from agent_platform.infrastructure.session_store import SessionStore
 
@@ -77,7 +77,7 @@ class SessionService:
         request: SessionChatRequest,
         *,
         event_hook: Callable[[dict[str, Any]], None] | None = None,
-    ) -> tuple[ResearchSession, str, str, MissionError | None, int | None]:
+    ) -> tuple[ResearchSession, str, str, MissionError | None, int | None, CompletionMetadata | None]:
         session = self._require(session_id)
         message_id = str(uuid.uuid4())
         user_turn = SessionTurn(
@@ -127,6 +127,7 @@ class SessionService:
                 trace_id=result.trace_id,
                 status=result.status.value,
                 web_tool_call_limit_used=mission_request.web_tool_call_limit,
+                completion=result.completion,
             )
         )
         session.last_error = result.error
@@ -145,6 +146,7 @@ class SessionService:
                         "assistant_message": assistant_message,
                         "status": result.status.value,
                         "web_tool_call_limit_used": mission_request.web_tool_call_limit,
+                        "completion": result.completion.model_dump(mode="json") if result.completion else None,
                         "error": _error_payload(result.error),
                         "created_at": utc_now().isoformat(),
                     },
@@ -161,7 +163,14 @@ class SessionService:
                     },
                 }
             )
-        return session, result.trace_id, assistant_message, result.error, mission_request.web_tool_call_limit
+        return (
+            session,
+            result.trace_id,
+            assistant_message,
+            result.error,
+            mission_request.web_tool_call_limit,
+            result.completion,
+        )
 
     def _build_mission_request(self, session: ResearchSession, request: SessionChatRequest) -> MissionRequest:
         return MissionRequest(

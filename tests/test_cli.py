@@ -5,6 +5,7 @@ from agent_platform.cli.formatters import format_final_stream_response, format_s
 from agent_platform.contracts.api import MissionStreamEvent
 from agent_platform.contracts.api import MissionRunResponse
 from agent_platform.domain.enums import MissionStatus, ResultFormat
+from agent_platform.domain.models import CompletionMetadata
 from agent_platform.domain.models import utc_now
 
 
@@ -67,6 +68,7 @@ def test_format_stream_event_and_final_response() -> None:
         trace_id="trace-1",
         started_at=utc_now().isoformat(),
         completed_at=utc_now().isoformat(),
+        completion=CompletionMetadata(finish_reason="stop", usage={"output_tokens": 12}),
     )
 
     assert "[12:34:56] Tool failed: graph_schema - browser_runtime_error: browser closed unexpectedly" in format_stream_event(
@@ -74,6 +76,7 @@ def test_format_stream_event_and_final_response() -> None:
     )
     final_rendered = format_final_stream_response(response, ["graph_schema"])
     assert "Tools: graph_schema" in final_rendered
+    assert "Finish reason: stop" in final_rendered
 
 
 def test_read_prompt_block_collects_multiline_prompt() -> None:

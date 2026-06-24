@@ -42,6 +42,10 @@ def format_final_stream_response(response: MissionRunResponse, tool_names: list[
         f"Trace: {response.trace_id}",
         f"Tools: {format_tool_names(tool_names)}",
     ]
+    if response.completion and response.completion.finish_reason:
+        lines.append(f"Finish reason: {response.completion.finish_reason}")
+        if response.completion.usage:
+            lines.append(f"Usage: {json.dumps(response.completion.usage, ensure_ascii=False, sort_keys=True)}")
     if response.error:
         lines.extend(
             [

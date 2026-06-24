@@ -14,7 +14,7 @@ from agent_platform.application.runtime_builder import MissionRuntime, RuntimeBu
 from agent_platform.config.settings import AppSettings
 from agent_platform.domain.enums import LogCategory, MissionStatus, ResultFormat
 from agent_platform.domain.exceptions import AgentPlatformError, ContextRefreshRequested, ModelError, ModelSwitchRequested, OutputValidationError
-from agent_platform.domain.models import ExecutionTrace, MemoryRetrievalRecord, MissionError, MissionRequest, MissionResult, utc_now
+from agent_platform.domain.models import CompletionMetadata, ExecutionTrace, MemoryRetrievalRecord, MissionError, MissionRequest, MissionResult, utc_now
 from agent_platform.infrastructure.logging import get_logger
 
 try:
@@ -67,10 +67,11 @@ class MissionService:
         self._append_runtime_event(runtime, "request_loaded", "mission request snapshot written")
         model_sequence = [runtime.context.current_model.name]
         prompt = request.prompt
+        completion_retry_used = False
         try:
             while True:
                 try:
-                    raw_output = await self._run_once(runtime, prompt)
+                    raw_output, completion = self._normalize_run_output(await self._run_once(runtime, prompt))
                 except ContextRefreshRequested as exc:
                     runtime.context.pending_context_refresh_reason = None
                     self._append_runtime_event(
@@ -117,7 +118,7 @@ class MissionService:
                     )
                 except OutputValidationError as exc:
                     repair_prompt = build_output_repair_prompt(runtime.context, raw_output, str(exc))
-                    raw_output = await self._run_once(runtime, repair_prompt)
+                    raw_output, completion = self._normalize_run_output(await self._run_once(runtime, repair_prompt))
                     if runtime.context.pending_model_switch:
                         next_model = self._promote_model(runtime, runtime.context.pending_model_switch)
                         if next_model is None:
@@ -150,6 +151,31 @@ class MissionService:
                             "output_validation_error",
                             str(repair_exc),
                         )
+                if self._should_continue_after_completion(completion):
+                    if completion_retry_used:
+                        return await self._fail(
+                            runtime,
+                            model_sequence,
+                            "completion_truncated",
+                            "model response ended with finish_reason=length after continuation",
+                        )
+                    completion_retry_used = True
+                    self._append_runtime_event(
+                        runtime,
+                        "completion_truncated",
+                        "model response ended with finish_reason=length; continuing",
+                        {
+                            "finish_reason": completion.finish_reason,
+                            "usage": completion.usage or {},
+                        },
+                    )
+                    prompt = self._build_completion_continuation_prompt(
+                        runtime,
+                        previous_output=raw_output,
+                        completion=completion,
+                        result_format=result_format,
+                    )
+                    continue
                 completed_at = utc_now()
                 mission_result = MissionResult(
                     status=MissionStatus.COMPLETED,
@@ -159,6 +185,7 @@ class MissionService:
                     trace_id=runtime.context.trace_id,
                     started_at=runtime.context.started_at,
                     completed_at=completed_at,
+                    completion=completion,
                 )
                 trace = self._persist_trace(runtime, model_sequence, mission_result, None)
                 self._maybe_schedule_skill_maintenance(trace)
@@ -184,7 +211,7 @@ class MissionService:
             with suppress(Exception):
                 runtime.db.close()
 
-    async def _run_once(self, runtime: MissionRuntime, prompt: str) -> Any:
+    async def _run_once(self, runtime: MissionRuntime, prompt: str) -> tuple[Any, CompletionMetadata | None]:
         session = self._agent_factory.create(runtime)
         extra = {"trace_id": runtime.context.trace_id}
         agent_prompt = self._build_agent_prompt(runtime, prompt)
@@ -226,7 +253,151 @@ class MissionService:
         )
         self._log_runtime_state(runtime)
         output = getattr(result, "output", result)
-        return output
+        return output, self._extract_completion_metadata(result)
+
+    def _normalize_run_output(self, raw_run: Any) -> tuple[Any, CompletionMetadata | None]:
+        if isinstance(raw_run, tuple) and len(raw_run) == 2:
+            output, completion = raw_run
+            return output, self._coerce_completion_metadata(completion)
+        if hasattr(raw_run, "output") and hasattr(raw_run, "completion"):
+            return getattr(raw_run, "output"), self._coerce_completion_metadata(getattr(raw_run, "completion"))
+        return raw_run, None
+
+    def _should_continue_after_completion(self, completion: CompletionMetadata | None) -> bool:
+        return completion is not None and completion.finish_reason == "length"
+
+    def _build_completion_continuation_prompt(
+        self,
+        runtime: MissionRuntime,
+        *,
+        previous_output: Any,
+        completion: CompletionMetadata,
+        result_format: ResultFormat,
+    ) -> str:
+        lines = [
+            "The previous answer was cut off because the provider returned finish_reason=length.",
+            "Continue from the cutoff and return only the final answer.",
+            f"Mission prompt: {runtime.context.mission_request.prompt}",
+            f"Previous finish reason: {completion.finish_reason}",
+        ]
+        if completion.usage:
+            lines.append("Previous usage:")
+            lines.append(json.dumps(completion.usage, ensure_ascii=False, sort_keys=True))
+        if runtime.context.mission_request.output_schema is not None:
+            lines.append("Output schema:")
+            lines.append(json.dumps(runtime.context.mission_request.output_schema, ensure_ascii=False, indent=2, sort_keys=True))
+            lines.append("Return a complete response that satisfies the schema.")
+        elif result_format is ResultFormat.TEXT:
+            lines.append("Continue the prose answer from the cutoff point without repeating the already-written part.")
+        lines.append("Previous partial answer:")
+        lines.append(self._stringify_output(previous_output))
+        return "\n".join(lines)
+
+    def _extract_completion_metadata(self, result: Any) -> CompletionMetadata | None:
+        finish_reason = self._find_field(result, {"finish_reason"})
+        usage = self._find_field(result, {"usage"})
+        if finish_reason is None and usage is None:
+            return None
+        normalized_usage = self._coerce_jsonable(usage) if usage is not None else None
+        finish_reason_text = str(finish_reason) if finish_reason is not None else None
+        return CompletionMetadata(finish_reason=finish_reason_text, usage=normalized_usage)
+
+    def _coerce_completion_metadata(self, value: Any) -> CompletionMetadata | None:
+        if value is None:
+            return None
+        if isinstance(value, CompletionMetadata):
+            return value
+        if isinstance(value, dict):
+            return CompletionMetadata.model_validate(value)
+        return self._extract_completion_metadata(value)
+
+    def _find_field(self, value: Any, field_names: set[str], visited: set[int] | None = None) -> Any:
+        if value is None:
+            return None
+        if visited is None:
+            visited = set()
+        marker = id(value)
+        if marker in visited:
+            return None
+        visited.add(marker)
+        if isinstance(value, dict):
+            for name in field_names:
+                if name in value and value[name] is not None:
+                    return value[name]
+            for nested in value.values():
+                found = self._find_field(nested, field_names, visited)
+                if found is not None:
+                    return found
+            return None
+        if isinstance(value, (list, tuple, set)):
+            for nested in value:
+                found = self._find_field(nested, field_names, visited)
+                if found is not None:
+                    return found
+            return None
+        for name in field_names:
+            if hasattr(value, name):
+                attr = getattr(value, name)
+                if callable(attr):
+                    try:
+                        attr = attr()
+                    except Exception:
+                        continue
+                if attr is not None:
+                    return attr
+        if hasattr(value, "model_dump"):
+            try:
+                dumped = value.model_dump(mode="json")
+            except Exception:
+                dumped = None
+            if dumped is not None:
+                found = self._find_field(dumped, field_names, visited)
+                if found is not None:
+                    return found
+        for name in ("response", "model_response", "result", "message", "data", "choice", "choices", "provider_response"):
+            if hasattr(value, name):
+                nested = getattr(value, name)
+                if callable(nested):
+                    try:
+                        nested = nested()
+                    except Exception:
+                        continue
+                found = self._find_field(nested, field_names, visited)
+                if found is not None:
+                    return found
+        return None
+
+    def _coerce_jsonable(self, value: Any) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, dict):
+            return {str(key): self._coerce_jsonable(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [self._coerce_jsonable(item) for item in value]
+        if hasattr(value, "model_dump"):
+            try:
+                return value.model_dump(mode="json")
+            except Exception:
+                pass
+        if hasattr(value, "__dict__"):
+            return {
+                key: self._coerce_jsonable(item)
+                for key, item in vars(value).items()
+                if not key.startswith("_")
+            }
+        return str(value)
+
+    def _stringify_output(self, value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        if hasattr(value, "model_dump_json"):
+            try:
+                return value.model_dump_json()
+            except Exception:
+                pass
+        if isinstance(value, (dict, list, int, float, bool)) or value is None:
+            return json.dumps(value, ensure_ascii=False)
+        return str(value)
 
     def _build_agent_prompt(self, runtime: MissionRuntime, prompt: str) -> str | list[UserContent]:
         if not self._is_skill_maintenance(runtime):
@@ -291,6 +462,7 @@ class MissionService:
             compression_events=getattr(runtime.context, "compression_events", []),
             runtime_events=getattr(runtime.context, "runtime_events", []),
             result=result.result if result else None,
+            completion=result.completion if result else None,
             error=error,
             started_at=runtime.context.started_at,
             completed_at=result.completed_at if result else utc_now(),

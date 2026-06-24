@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from agent_platform.contracts.api import MissionRunError
+from agent_platform.domain.models import CompletionMetadata
 
 
 class SessionOpenRequest(BaseModel):
@@ -46,6 +47,7 @@ class SessionTurnResponse(BaseModel):
     trace_id: str | None = None
     status: str
     web_tool_call_limit_used: int | None = None
+    completion: CompletionMetadata | None = None
 
 
 class SessionDetailResponse(SessionSummaryResponse):
@@ -77,6 +79,7 @@ class SessionChatResponse(BaseModel):
     status: str
     assistant_message: str
     web_tool_call_limit_used: int | None = None
+    completion: CompletionMetadata | None = None
     error: MissionRunError | None = None
     updated_at: str
 

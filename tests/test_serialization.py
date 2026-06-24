@@ -2,7 +2,7 @@ from datetime import timezone
 
 from agent_platform.contracts.serialization import to_api_response
 from agent_platform.domain.enums import MissionStatus, ResultFormat
-from agent_platform.domain.models import MissionResult, utc_now
+from agent_platform.domain.models import CompletionMetadata, MissionResult, utc_now
 
 
 def test_to_api_response_serializes_datetimes() -> None:
@@ -15,7 +15,10 @@ def test_to_api_response_serializes_datetimes() -> None:
         trace_id="trace-1",
         started_at=now,
         completed_at=now,
+        completion=CompletionMetadata(finish_reason="stop", usage={"output_tokens": 9}),
     )
     response = to_api_response(result)
     assert response.trace_id == "trace-1"
     assert response.started_at.endswith("+00:00")
+    assert response.completion is not None
+    assert response.completion.finish_reason == "stop"

@@ -31,6 +31,11 @@ class MissionError(BaseModel):
     details: dict[str, Any] | None = None
 
 
+class CompletionMetadata(BaseModel):
+    finish_reason: str | None = None
+    usage: dict[str, Any] | None = None
+
+
 class MissionResult(BaseModel):
     status: MissionStatus
     result: Any = None
@@ -39,6 +44,7 @@ class MissionResult(BaseModel):
     trace_id: str
     started_at: datetime
     completed_at: datetime
+    completion: CompletionMetadata | None = None
     error: MissionError | None = None
 
 
@@ -383,6 +389,7 @@ class ExecutionTrace(BaseModel):
     compression_events: list[CompressionEvent]
     runtime_events: list[RuntimeEvent]
     result: Any = None
+    completion: CompletionMetadata | None = None
     error: MissionError | None = None
     started_at: datetime
     completed_at: datetime
@@ -396,6 +403,7 @@ class SessionTurn(BaseModel):
     trace_id: str | None = None
     status: str = "completed"
     web_tool_call_limit_used: int | None = None
+    completion: CompletionMetadata | None = None
 
 
 class SessionSummary(BaseModel):
