@@ -413,6 +413,17 @@ class SessionSummary(BaseModel):
     last_trace_id: str | None = None
 
 
+class SessionAgentContext(BaseModel):
+    session_id: str
+    active_turns: list[SessionTurn] = Field(default_factory=list)
+    current_mission_message_id: str | None = None
+    compressed_memory: CompressedMemory | None = None
+    compression_notice: str | None = None
+    historical_turn_count: int = 0
+    last_compaction_size: int = 0
+    last_compacted_at: datetime | None = None
+
+
 class ResearchSession(BaseModel):
     session_id: str
     name: str

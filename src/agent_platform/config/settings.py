@@ -39,6 +39,7 @@ class SessionSettings(BaseModel):
     db_directory: Path = Path("dbs")
     shared_db_path: Path = Path("dbs/shared.kuzu")
     history_turn_limit: int = 12
+    active_context_turn_limit: int = 8
     summary_tool_limit: int = 12
     graph_node_limit: int = 300
     graph_edge_limit: int = 300

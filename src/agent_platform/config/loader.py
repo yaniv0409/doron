@@ -74,6 +74,11 @@ def apply_environment(settings: AppSettings, environ: dict[str, str] | os._Envir
     )
     _set_if_present(
         environ,
+        "AGENT_PLATFORM_SESSION_ACTIVE_CONTEXT_TURN_LIMIT",
+        lambda value: _setattr(settings.sessions, "active_context_turn_limit", int(value)),
+    )
+    _set_if_present(
+        environ,
         "AGENT_PLATFORM_SESSION_SUMMARY_TOOL_LIMIT",
         lambda value: _setattr(settings.sessions, "summary_tool_limit", int(value)),
     )

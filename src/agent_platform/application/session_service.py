@@ -3,27 +3,67 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from agent_platform.application.context_compression import ContextCompressor
 from agent_platform.application.mission_service import MissionService
 from agent_platform.config.settings import AppSettings
 from agent_platform.contracts.session import SessionChatRequest, SessionOpenRequest, SessionUpdateRequest
-from agent_platform.domain.models import CompletionMetadata, ExecutionTrace, MissionError, MissionRequest, ResearchSession, SessionSummary, SessionTurn, utc_now
+from agent_platform.domain.models import (
+    CompletionMetadata,
+    CompressedMemory,
+    ExecutionTrace,
+    MissionError,
+    MissionRequest,
+    ModelDescriptor,
+    ResearchSession,
+    RuntimeContext,
+    SessionAgentContext,
+    SessionSummary,
+    SessionTurn,
+    utc_now,
+)
+from agent_platform.infrastructure.model_catalog import ModelCatalog
 from agent_platform.infrastructure.kuzu_client import KuzuGateway
+from agent_platform.infrastructure.session_context_store import SessionContextStore
 from agent_platform.infrastructure.session_store import SessionStore
 
 
+@dataclass(slots=True)
+class _SessionCompressionRuntime:
+    context: RuntimeContext
+    services: Any
+
+
 class SessionService:
-    def __init__(self, settings: AppSettings, mission_service: MissionService, store: SessionStore) -> None:
+    def __init__(
+        self,
+        settings: AppSettings,
+        mission_service: MissionService,
+        store: SessionStore,
+        context_store: SessionContextStore | None = None,
+    ) -> None:
         self._settings = settings
         self._mission_service = mission_service
         self._store = store
+        self._context_store = context_store or SessionContextStore(settings.sessions)
+        self._model_catalog = ModelCatalog(settings)
+        self._context_compressor = ContextCompressor(settings.compression)
 
     def open(self, request: SessionOpenRequest) -> ResearchSession:
         normalized_name = normalize_session_name(request.name)
         existing = self._store.find_by_normalized_name(normalized_name)
         if existing is not None:
+            if self._context_store.load(existing.session_id) is None:
+                self._context_store.save(
+                    SessionAgentContext(
+                        session_id=existing.session_id,
+                        active_turns=list(existing.turns),
+                        current_mission_message_id=self._latest_user_message_id(existing.turns),
+                    )
+                )
             return existing
 
         session_id = str(uuid.uuid4())
@@ -46,6 +86,13 @@ class SessionService:
             updated_at=now,
         )
         self._store.save(session)
+        self._context_store.save(
+            SessionAgentContext(
+                session_id=session.session_id,
+                active_turns=[],
+                current_mission_message_id=None,
+            )
+        )
         return session
 
     def list_sessions(self) -> list[ResearchSession]:
@@ -89,6 +136,10 @@ class SessionService:
         session.turns.append(user_turn)
         session.updated_at = utc_now()
         self._store.save(session)
+        context_state = self._load_context(session)
+        context_state.active_turns.append(user_turn)
+        context_state.current_mission_message_id = user_turn.message_id
+        self._context_store.save(context_state)
         if event_hook is not None:
             event_hook(
                 {
@@ -113,28 +164,38 @@ class SessionService:
             }
             event_hook(payload)
 
-        mission_request = self._build_mission_request(session, request)
+        mission_request = self._build_mission_request(session, request, context_state)
+        context_state = await self._compact_context_if_needed(session, mission_request, context_state)
+        self._context_store.save(context_state)
+        mission_request = self._build_mission_request(session, request, context_state)
         result = await self._mission_service.run(
             mission_request,
             event_hook=wrapped_event_hook if event_hook is not None else None,
         )
         assistant_message = _stringify_result(result.result if result.error is None else result.error.message)
-        session.turns.append(
-            SessionTurn(
-                message_id=str(uuid.uuid4()),
-                role="assistant",
-                content=assistant_message,
-                trace_id=result.trace_id,
-                status=result.status.value,
-                web_tool_call_limit_used=mission_request.web_tool_call_limit,
-                completion=result.completion,
-            )
+        assistant_turn = SessionTurn(
+            message_id=str(uuid.uuid4()),
+            role="assistant",
+            content=assistant_message,
+            trace_id=result.trace_id,
+            status=result.status.value,
+            web_tool_call_limit_used=mission_request.web_tool_call_limit,
+            completion=result.completion,
         )
+        session.turns.append(assistant_turn)
+        context_state.active_turns.append(assistant_turn)
         session.last_error = result.error
         session.updated_at = utc_now()
         trace = self._read_trace(result.trace_id)
         session.summary = self._build_summary(trace, session)
+        if context_state.compression_notice:
+            session.summary.compression_notice = context_state.compression_notice
         self._store.save(session)
+        context_state = await self._compact_context_if_needed(session, mission_request, context_state)
+        if context_state.compression_notice:
+            session.summary.compression_notice = context_state.compression_notice
+            self._store.save(session)
+        self._context_store.save(context_state)
         if event_hook is not None:
             event_hook(
                 {
@@ -172,9 +233,14 @@ class SessionService:
             result.completion,
         )
 
-    def _build_mission_request(self, session: ResearchSession, request: SessionChatRequest) -> MissionRequest:
+    def _build_mission_request(
+        self,
+        session: ResearchSession,
+        request: SessionChatRequest,
+        context_state: SessionAgentContext,
+    ) -> MissionRequest:
         return MissionRequest(
-            prompt=self._build_prompt(session, request.message.strip()),
+            prompt=self._build_prompt(session, context_state, request.message.strip()),
             db_path=session.db_path,
             output_schema=request.output_schema if request.output_schema is not None else session.output_schema,
             preferred_model=request.preferred_model if request.preferred_model is not None else session.preferred_model,
@@ -187,25 +253,185 @@ class SessionService:
             web_tool_call_limit=self._resolve_web_tool_limit(session, request),
         )
 
-    def _build_prompt(self, session: ResearchSession, message: str) -> str:
+    def _build_prompt(self, session: ResearchSession, context_state: SessionAgentContext, message: str) -> str:
+        current_message_id = context_state.current_mission_message_id
+        historical_turns = [turn for turn in context_state.active_turns if turn.message_id != current_message_id]
         lines = [
             f"You are continuing a research session named {session.name}.",
-            "Build on prior findings and keep the work cumulative.",
+            "Treat the newest user message as the current primary mission.",
+            "Use prior context only as supporting background.",
+            "Current mission:",
+            message,
         ]
-        if session.summary.notes:
-            lines.append("Session notes:")
-            lines.extend(f"- {item}" for item in session.summary.notes)
-        if session.summary.recent_tools:
-            lines.append("Recent tool outcomes:")
-            lines.extend(f"- {item}" for item in session.summary.recent_tools)
-        if session.summary.compression_notice:
-            lines.append(f"Compression notice: {session.summary.compression_notice}")
-        recent_turns = session.turns[-self._settings.sessions.history_turn_limit :]
-        if recent_turns:
-            lines.append("Recent conversation:")
-            lines.extend(f"{turn.role.title()}: {turn.content}" for turn in recent_turns)
-        lines.append(f"User: {message}")
+        if context_state.compression_notice:
+            lines.append(f"Compaction notice: {context_state.compression_notice}")
+        lines.extend(self._build_compacted_context_lines(context_state.compressed_memory))
+        if historical_turns:
+            lines.append("Recent active turns:")
+            lines.extend(f"{turn.role.title()}: {turn.content}" for turn in historical_turns)
         return "\n".join(lines)
+
+    def _build_compacted_context_lines(self, compressed: CompressedMemory | None) -> list[str]:
+        if compressed is None:
+            return []
+        lines: list[str] = []
+        if compressed.notes:
+            lines.append("Compacted notes:")
+            lines.extend(f"- {item}" for item in compressed.notes)
+        if compressed.db_findings:
+            lines.append("Compacted database findings:")
+            lines.extend(f"- {item}" for item in compressed.db_findings)
+        if compressed.web_findings:
+            lines.append("Compacted web findings:")
+            lines.extend(f"- {item}" for item in compressed.web_findings)
+        if compressed.tool_summaries:
+            lines.append("Compacted tool summaries:")
+            lines.extend(f"- {item}" for item in compressed.tool_summaries)
+        if compressed.unresolved_goals:
+            lines.append("Open threads from earlier turns:")
+            lines.extend(f"- {item}" for item in compressed.unresolved_goals)
+        return lines
+
+    async def _compact_context_if_needed(
+        self,
+        session: ResearchSession,
+        mission_request: MissionRequest,
+        context_state: SessionAgentContext,
+    ) -> SessionAgentContext:
+        model = self._select_model(mission_request)
+        budget = self._context_budget(model)
+        keep_turns = max(1, self._settings.sessions.active_context_turn_limit)
+        while self._estimate_context_size(session, context_state) > budget and len(context_state.active_turns) > keep_turns:
+            compacted_turns = context_state.active_turns[:-keep_turns]
+            kept_turns = context_state.active_turns[-keep_turns:]
+            try:
+                compressed = await self._compress_context_state(mission_request, context_state, compacted_turns, model)
+            except Exception:
+                break
+            context_state.compressed_memory = compressed
+            context_state.compression_notice = (
+                compressed.notice
+                or f"Session context was compacted for {model.name}."
+            )
+            context_state.active_turns = kept_turns
+            context_state.historical_turn_count += len(compacted_turns)
+            context_state.last_compaction_size = self._estimate_context_size(session, context_state)
+            context_state.last_compacted_at = utc_now()
+        return context_state
+
+    async def _compress_context_state(
+        self,
+        mission_request: MissionRequest,
+        context_state: SessionAgentContext,
+        compacted_turns: list[SessionTurn],
+        model: ModelDescriptor,
+    ) -> CompressedMemory:
+        runtime = self._build_session_compression_runtime(
+            mission_request,
+            context_state,
+            compacted_turns,
+            model,
+        )
+        result = await self._context_compressor.compress(
+            runtime,
+            trigger="session_context",
+            reason="session context exceeded model budget",
+        )
+        if not result.ok or runtime.context.compressed_memory is None:
+            raise ValueError(result.error_message or "session context compression failed")
+        return runtime.context.compressed_memory
+
+    def _build_session_compression_runtime(
+        self,
+        mission_request: MissionRequest,
+        context_state: SessionAgentContext,
+        compacted_turns: list[SessionTurn],
+        model: ModelDescriptor,
+    ) -> _SessionCompressionRuntime:
+        allowed_models = self._model_catalog.resolve_allowed(mission_request)
+        compression_request = MissionRequest(
+            prompt=self._current_mission_text(context_state, mission_request.prompt),
+            db_path=mission_request.db_path,
+            output_schema=mission_request.output_schema,
+            preferred_model=model.name,
+            allowed_models=[item.name for item in allowed_models],
+            mission_metadata=mission_request.mission_metadata,
+            web_enabled=mission_request.web_enabled,
+            db_mutation_enabled=mission_request.db_mutation_enabled,
+            web_tool_call_limit=mission_request.web_tool_call_limit,
+        )
+        context = RuntimeContext(
+            trace_id=f"session-context-{context_state.session_id}",
+            mission_request=compression_request,
+            started_at=utc_now(),
+            current_model=model,
+            allowed_models=allowed_models,
+            reasoning_notes=self._seed_reasoning_notes(context_state, compacted_turns),
+            db_findings=list(context_state.compressed_memory.db_findings if context_state.compressed_memory else []),
+            web_findings=list(context_state.compressed_memory.web_findings if context_state.compressed_memory else []),
+            tool_summaries=self._seed_tool_summaries(context_state),
+            web_tool_call_budget=mission_request.web_tool_call_limit or self._settings.browser.web_tool_call_budget,
+        )
+        services = self._mission_service._runtime_builder.services
+        return _SessionCompressionRuntime(context=context, services=services)
+
+    def _seed_reasoning_notes(
+        self,
+        context_state: SessionAgentContext,
+        compacted_turns: list[SessionTurn],
+    ) -> list[str]:
+        notes = list(context_state.compressed_memory.notes if context_state.compressed_memory else [])
+        notes.extend(f"{turn.role.title()}: {turn.content}" for turn in compacted_turns)
+        return notes
+
+    def _seed_tool_summaries(self, context_state: SessionAgentContext) -> list[str]:
+        summaries = list(context_state.compressed_memory.tool_summaries if context_state.compressed_memory else [])
+        if context_state.compressed_memory is not None:
+            summaries.extend(f"unresolved: {item}" for item in context_state.compressed_memory.unresolved_goals)
+        return summaries
+
+    def _load_context(self, session: ResearchSession) -> SessionAgentContext:
+        context_state = self._context_store.load(session.session_id)
+        if context_state is not None:
+            return context_state
+        active_turns = list(session.turns)
+        context_state = SessionAgentContext(
+            session_id=session.session_id,
+            active_turns=active_turns,
+            current_mission_message_id=self._latest_user_message_id(active_turns),
+        )
+        self._context_store.save(context_state)
+        return context_state
+
+    def _latest_user_message_id(self, turns: list[SessionTurn]) -> str | None:
+        for turn in reversed(turns):
+            if turn.role == "user":
+                return turn.message_id
+        return None
+
+    def _current_mission_text(self, context_state: SessionAgentContext, fallback: str) -> str:
+        current_message_id = context_state.current_mission_message_id
+        if current_message_id is None:
+            return fallback
+        for turn in reversed(context_state.active_turns):
+            if turn.message_id == current_message_id:
+                return turn.content
+        return fallback
+
+    def _select_model(self, mission_request: MissionRequest) -> ModelDescriptor:
+        return self._model_catalog.choose_initial(mission_request)
+
+    def _context_budget(self, model: ModelDescriptor) -> int:
+        if model.context_window is None:
+            return self._settings.compression.fallback_budget_chars
+        return max(
+            int(model.context_window * self._settings.compression.threshold_ratio),
+            self._settings.compression.fallback_budget_chars,
+        )
+
+    def _estimate_context_size(self, session: ResearchSession, context_state: SessionAgentContext) -> int:
+        prompt = self._build_prompt(session, context_state, self._current_mission_text(context_state, ""))
+        return len(prompt)
 
     def _build_summary(self, trace: ExecutionTrace | None, session: ResearchSession) -> SessionSummary:
         if trace is None:

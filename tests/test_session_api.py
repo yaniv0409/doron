@@ -11,7 +11,16 @@ from agent_platform.application.session_service import SessionService
 from agent_platform.config.settings import AppSettings, SessionSettings
 from agent_platform.contracts.session import SessionChatRequest, SessionGraphResponse, SessionOpenRequest, SessionUpdateRequest
 from agent_platform.domain.enums import MissionStatus, ResultFormat
-from agent_platform.domain.models import CompressionEvent, CompletionMetadata, ExecutionTrace, MissionRequest, MissionResult, utc_now
+from agent_platform.domain.models import (
+    CompressionEvent,
+    CompressedMemory,
+    CompletionMetadata,
+    ExecutionTrace,
+    MissionRequest,
+    MissionResult,
+    utc_now,
+)
+from agent_platform.infrastructure.session_context_store import SessionContextStore
 from agent_platform.infrastructure.session_store import SessionStore
 
 
@@ -132,6 +141,7 @@ def test_open_resume_and_update_session(tmp_path: Path) -> None:
     assert first.session_id == second.session_id
     assert first.web_tool_call_limit == 4
     assert first.db_path.endswith(".kuzu")
+    assert (settings.sessions.directory / f"{first.session_id}.context.json").exists()
 
     updated = service.update(first.session_id, SessionUpdateRequest(web_tool_call_limit=9))
 
@@ -162,6 +172,69 @@ def test_session_chat_persists_and_uses_web_limit(tmp_path: Path) -> None:
     assert mission_service.requests[0].web_tool_call_limit == 7
     assert len(updated.turns) == 2
     assert updated.summary.last_trace_id == "trace-1"
+    context_store = SessionContextStore(settings.sessions)
+    context = context_store.load(session.session_id)
+    assert context is not None
+    assert len(context.active_turns) == 2
+    assert context.current_mission_message_id == updated.turns[0].message_id
+
+
+def test_session_prompt_prioritizes_current_mission(tmp_path: Path) -> None:
+    settings = AppSettings()
+    settings.sessions = SessionSettings(
+        directory=tmp_path / "sessions-prompt",
+        db_directory=tmp_path / "dbs-prompt",
+        shared_db_path=tmp_path / "dbs-prompt" / "shared.kuzu",
+    )
+    mission_service = FakeMissionService()
+    service = SessionService(settings, mission_service, SessionStore(settings.sessions))
+    session = service.open(SessionOpenRequest(name="Prompt Test"))
+
+    asyncio.run(service.run_chat(session.session_id, SessionChatRequest(message="First mission")))
+    asyncio.run(service.run_chat(session.session_id, SessionChatRequest(message="Second mission is the main one")))
+
+    prompt = mission_service.requests[-1].prompt
+
+    assert "Current mission:\nSecond mission is the main one" in prompt
+    assert "Recent active turns:" in prompt
+    assert "User: First mission" in prompt
+    assert prompt.index("Current mission:\nSecond mission is the main one") < prompt.index("Recent active turns:")
+
+
+def test_session_context_compacts_without_dropping_visible_history(tmp_path: Path) -> None:
+    settings = AppSettings()
+    settings.sessions = SessionSettings(
+        directory=tmp_path / "sessions-compact",
+        db_directory=tmp_path / "dbs-compact",
+        shared_db_path=tmp_path / "dbs-compact" / "shared.kuzu",
+        active_context_turn_limit=2,
+    )
+    settings.compression.fallback_budget_chars = 100
+    settings.models[0].context_window = 200
+    mission_service = FakeMissionService()
+    service = SessionService(settings, mission_service, SessionStore(settings.sessions))
+
+    async def fake_compress(mission_request, context_state, compacted_turns, model):
+        return CompressedMemory(
+            notes=[f"compacted {len(compacted_turns)} turn(s)"],
+            unresolved_goals=["carry forward prior context"],
+            notice="session context compacted",
+        )
+
+    service._compress_context_state = fake_compress  # type: ignore[method-assign]
+    session = service.open(SessionOpenRequest(name="Compact Test"))
+
+    asyncio.run(service.run_chat(session.session_id, SessionChatRequest(message="A" * 220)))
+    updated, *_ = asyncio.run(service.run_chat(session.session_id, SessionChatRequest(message="B" * 220)))
+
+    context_store = SessionContextStore(settings.sessions)
+    context = context_store.load(session.session_id)
+
+    assert context is not None
+    assert len(updated.turns) == 4
+    assert len(context.active_turns) <= 3
+    assert context.compressed_memory is not None
+    assert context.compression_notice == "session context compacted"
 
 
 def test_session_routes_stream_and_graph(tmp_path: Path) -> None:

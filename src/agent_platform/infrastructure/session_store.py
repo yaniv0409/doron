@@ -33,6 +33,8 @@ class SessionStore:
     def list_sessions(self) -> list[ResearchSession]:
         sessions: list[ResearchSession] = []
         for path in sorted(self._settings.directory.glob("*.json")):
+            if path.name.endswith(".context.json"):
+                continue
             payload = json.loads(path.read_text(encoding="utf-8"))
             sessions.append(self._adapter.validate_python(payload))
         return sessions
