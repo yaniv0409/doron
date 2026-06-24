@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { ReactMarkdown } from "react-markdown";
+import rehypeHighlight from "rehype-highlight";
+import remarkGfm from "remark-gfm";
+import "highlight.js/styles/github-dark.css";
 import GraphPanel from "./GraphPanel";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
@@ -232,7 +236,7 @@ export default function App() {
                   <strong>{turn.role === "user" ? "You" : "Doron"}</strong>
                   <span>{turn.web_tool_call_limit_used ?? "-"}</span>
                 </header>
-                <pre>{turn.content}</pre>
+                <TurnContent turn={turn} />
               </article>
             ))}
             {pendingUserMessage ? (
@@ -435,6 +439,23 @@ function toDisplayLimit(value) {
   return String(value);
 }
 
+function TurnContent({ turn }) {
+  if (turn.role === "assistant" && turn.result_format === "text") {
+    return (
+      <div className="markdown-body">
+        <ReactMarkdown
+          rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}
+          remarkPlugins={[remarkGfm]}
+          components={MARKDOWN_COMPONENTS}
+        >
+          {turn.content}
+        </ReactMarkdown>
+      </div>
+    );
+  }
+  return <pre>{turn.content}</pre>;
+}
+
 function resolveToolName(payload) {
   if (typeof payload?.name === "string" && payload.name) {
     return payload.name;
@@ -494,3 +515,19 @@ function cryptoRandomId() {
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
+
+const MARKDOWN_COMPONENTS = {
+  a(props) {
+    return <a {...props} rel="noreferrer" target="_blank" />;
+  },
+  pre(props) {
+    return <pre className="markdown-code-block" {...props} />;
+  },
+  table(props) {
+    return (
+      <div className="markdown-table-wrap">
+        <table {...props} />
+      </div>
+    );
+  },
+};

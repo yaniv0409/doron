@@ -11,6 +11,7 @@ export default function GraphPanel({ graph, onInspect }) {
     if (!container) {
       return undefined;
     }
+    let disposed = false;
 
     const network = new Network(
       container,
@@ -55,13 +56,20 @@ export default function GraphPanel({ graph, onInspect }) {
     );
 
     function refreshLayout() {
+      if (disposed || !network || !network.body?.container) {
+        return;
+      }
       if (!container.clientWidth || !container.clientHeight) {
         return;
       }
-      network.redraw();
-      network.fit({
-        animation: false,
-      });
+      try {
+        network.redraw();
+        network.fit({
+          animation: false,
+        });
+      } catch {
+        // Ignore late resize events during teardown.
+      }
     }
 
     const resizeObserver = new ResizeObserver(() => {
@@ -90,6 +98,7 @@ export default function GraphPanel({ graph, onInspect }) {
     });
 
     return () => {
+      disposed = true;
       resizeObserver.disconnect();
       network.destroy();
     };
