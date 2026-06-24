@@ -29,6 +29,8 @@ export default function App() {
   }, []);
 
   const turns = activeSession?.turns || [];
+  const pendingUserMessage = isSending ? message.trim() : "";
+  const showThinkingBlock = isSending || activity.length > 0;
   const graphSummary = useMemo(
     () => `${graph.node_count || 0} nodes, ${graph.edge_count || 0} edges`,
     [graph],
@@ -223,7 +225,7 @@ export default function App() {
             ) : null}
           </div>
 
-          <div className="chat-log card">
+          <div className="chat-log">
             {turns.map((turn) => (
               <article className={`turn ${turn.role}`} key={turn.message_id}>
                 <header>
@@ -233,36 +235,52 @@ export default function App() {
                 <pre>{turn.content}</pre>
               </article>
             ))}
-          </div>
-
-          <div className="activity card">
-            <h3>Live activity</h3>
-            <div className="activity-log">
-              {activity.map((item) =>
-                item.kind === "tool" ? (
-                  <details className={`activity-item tool ${item.status}`} key={item.id}>
-                    <summary>
-                      <span className="activity-summary">{item.summary}</span>
-                      <span className="activity-status">{item.statusLabel}</span>
-                    </summary>
-                    <div className="activity-panel">
-                      <div className="activity-panel-heading">Parameters</div>
-                      <pre>{formatJson(item.parameters)}</pre>
-                      {item.reason ? (
-                        <>
-                          <div className="activity-panel-heading">Reason</div>
-                          <pre>{item.reason}</pre>
-                        </>
-                      ) : null}
-                    </div>
-                  </details>
-                ) : (
-                  <div className="activity-line" key={item.id}>
-                    {item.text}
+            {pendingUserMessage ? (
+              <article className="turn user pending-turn" key="pending-user-message">
+                <header>
+                  <strong>You</strong>
+                  <span>{toDisplayLimit(messageWebLimit)}</span>
+                </header>
+                <pre>{pendingUserMessage}</pre>
+              </article>
+            ) : null}
+            {showThinkingBlock ? (
+              <article className="turn assistant thinking-turn" key="live-activity">
+                <header>
+                  <strong>Doron</strong>
+                  <span>{isSending ? "thinking" : "activity"}</span>
+                </header>
+                <div className="thinking-shell">
+                  <div className="thinking-label">Live activity</div>
+                  <div className="activity-log">
+                    {activity.map((item) =>
+                      item.kind === "tool" ? (
+                        <details className={`activity-item tool ${item.status}`} key={item.id}>
+                          <summary>
+                            <span className="activity-summary">{item.summary}</span>
+                            <span className="activity-status">{item.statusLabel}</span>
+                          </summary>
+                          <div className="activity-panel">
+                            <div className="activity-panel-heading">Parameters</div>
+                            <pre>{formatJson(item.parameters)}</pre>
+                            {item.reason ? (
+                              <>
+                                <div className="activity-panel-heading">Reason</div>
+                                <pre>{item.reason}</pre>
+                              </>
+                            ) : null}
+                          </div>
+                        </details>
+                      ) : (
+                        <div className="activity-line" key={item.id}>
+                          {item.text}
+                        </div>
+                      ),
+                    )}
                   </div>
-                ),
-              )}
-            </div>
+                </div>
+              </article>
+            ) : null}
           </div>
 
           <form className="composer card" onSubmit={sendMessage}>
@@ -408,6 +426,13 @@ function toNullableNumber(value) {
     return null;
   }
   return Number(value);
+}
+
+function toDisplayLimit(value) {
+  if (value === "" || value === null || value === undefined) {
+    return "-";
+  }
+  return String(value);
 }
 
 function resolveToolName(payload) {

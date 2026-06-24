@@ -7,12 +7,13 @@ export default function GraphPanel({ graph, onInspect }) {
   const containerRef = useRef(null);
 
   useEffect(() => {
-    if (!containerRef.current) {
+    const container = containerRef.current;
+    if (!container) {
       return undefined;
     }
 
     const network = new Network(
-      containerRef.current,
+      container,
       {
         nodes: new DataSet(
           graph.nodes.map((node) => ({
@@ -37,20 +38,40 @@ export default function GraphPanel({ graph, onInspect }) {
         autoResize: true,
         layout: { improvedLayout: true },
         physics: { stabilization: true },
+        interaction: { hover: true },
         nodes: {
           color: {
             background: "#f9c74f",
-            border: "#203047",
-            highlight: { background: "#90be6d", border: "#203047" },
+            border: "#7ea6c7",
+            highlight: { background: "#43aa8b", border: "#d7e5f3" },
           },
-          font: { color: "#132238", face: "Georgia" },
+          font: { color: "#08111b", face: "Georgia" },
         },
         edges: {
-          color: "#4d6a8a",
-          font: { align: "middle", color: "#203047" },
+          color: "#6f91b3",
+          font: { align: "middle", color: "#d4e0ec" },
         },
       },
     );
+
+    function refreshLayout() {
+      if (!container.clientWidth || !container.clientHeight) {
+        return;
+      }
+      network.redraw();
+      network.fit({
+        animation: false,
+      });
+    }
+
+    const resizeObserver = new ResizeObserver(() => {
+      refreshLayout();
+    });
+    resizeObserver.observe(container);
+
+    requestAnimationFrame(() => {
+      refreshLayout();
+    });
 
     network.on("click", (event) => {
       const [nodeId] = event.nodes;
@@ -68,7 +89,10 @@ export default function GraphPanel({ graph, onInspect }) {
       }
     });
 
-    return () => network.destroy();
+    return () => {
+      resizeObserver.disconnect();
+      network.destroy();
+    };
   }, [graph, onInspect]);
 
   return <div className="graph-canvas" ref={containerRef} />;
