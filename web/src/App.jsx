@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { JsonView, collapseAllNested, darkStyles } from "react-json-view-lite";
 import { ReactMarkdown } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import "highlight.js/styles/github-dark.css";
+import "react-json-view-lite/dist/index.css";
 import GraphPanel from "./GraphPanel";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
@@ -13,6 +15,23 @@ const EMPTY_GRAPH = {
   node_count: 0,
   edge_count: 0,
 };
+
+const INSPECTOR_JSON_STYLES = extendJsonViewStyles(darkStyles, {
+  container: "inspector-json",
+  childFieldsContainer: "inspector-json-children",
+  collapseIcon: "inspector-json-collapse-icon",
+  expandIcon: "inspector-json-expand-icon",
+  collapsedContent: "inspector-json-collapsed-content",
+  label: "inspector-json-label",
+  clickableLabel: "inspector-json-clickable-label",
+  nullValue: "inspector-json-null-value",
+  undefinedValue: "inspector-json-undefined-value",
+  numberValue: "inspector-json-number-value",
+  stringValue: "inspector-json-string-value",
+  booleanValue: "inspector-json-boolean-value",
+  otherValue: "inspector-json-other-value",
+  punctuation: "inspector-json-punctuation",
+});
 
 export default function App() {
   const [sessions, setSessions] = useState([]);
@@ -400,8 +419,7 @@ export default function App() {
             <GraphPanel graph={filteredGraph} onInspect={setInspectedItem} />
           </div>
           <div className="card inspector">
-            <h3>Metadata inspector</h3>
-            <pre>{inspectedItem ? JSON.stringify(inspectedItem, null, 2) : "Select a node or edge."}</pre>
+            <MetadataInspector item={inspectedItem} />
           </div>
         </section>
       </main>
@@ -591,6 +609,129 @@ function flattenSearchValue(value) {
 
 function normalizeSearchText(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function extendJsonViewStyles(baseStyles, additions) {
+  return Object.fromEntries(
+    Object.entries(baseStyles).map(([key, value]) => [key, joinJsonViewClasses(value, additions[key])]),
+  );
+}
+
+function joinJsonViewClasses(baseClassName, extraClassName) {
+  if (!extraClassName) {
+    return baseClassName;
+  }
+  if (!baseClassName) {
+    return extraClassName;
+  }
+  return `${baseClassName} ${extraClassName}`;
+}
+
+function MetadataInspector({ item }) {
+  const [query, setQuery] = useState("");
+  const normalizedQuery = normalizeSearchText(query);
+  const filteredItem = useMemo(() => filterMetadataValue(item, normalizedQuery), [item, normalizedQuery]);
+  const showEmptyState = !item;
+  const showNoMatchState = Boolean(item) && normalizedQuery && filteredItem === undefined;
+
+  useEffect(() => {
+    setQuery("");
+  }, [item]);
+
+  return (
+    <>
+      <div className="inspector-header">
+        <div>
+          <h3>Metadata inspector</h3>
+          <p>Inspect selected graph items as searchable JSON.</p>
+        </div>
+        <label className="inspector-search">
+          <span>Search metadata</span>
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search keys and values..."
+            disabled={!item}
+          />
+        </label>
+      </div>
+      <div className="inspector-body">
+        {showEmptyState ? (
+          <div className="inspector-state">Select a node or edge.</div>
+        ) : showNoMatchState ? (
+          <div className="inspector-state">No matching metadata fields.</div>
+        ) : (
+          <JsonView
+            aria-label="Metadata JSON viewer"
+            clickToExpandNode
+            compactTopLevel={false}
+            data={filteredItem}
+            shouldExpandNode={resolveInspectorExpansion}
+            style={INSPECTOR_JSON_STYLES}
+          />
+        )}
+      </div>
+    </>
+  );
+}
+
+function resolveInspectorExpansion(level, value, field) {
+  if (field === "properties") {
+    return true;
+  }
+  return collapseAllNested(level, value, field);
+}
+
+function filterMetadataValue(value, normalizedQuery) {
+  if (!normalizedQuery) {
+    return value;
+  }
+  return filterMetadataBranch(value, normalizedQuery);
+}
+
+function filterMetadataBranch(value, normalizedQuery) {
+  if (value === null || value === undefined) {
+    return matchesMetadataPrimitive(value, normalizedQuery) ? value : undefined;
+  }
+
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return matchesMetadataPrimitive(value, normalizedQuery) ? value : undefined;
+  }
+
+  if (Array.isArray(value)) {
+    const filteredItems = value
+      .map((item) => filterMetadataBranch(item, normalizedQuery))
+      .filter((item) => item !== undefined);
+    if (filteredItems.length > 0) {
+      return filteredItems;
+    }
+    return value.some((item, index) => matchesMetadataComposite(index, item, normalizedQuery)) ? value : undefined;
+  }
+
+  if (typeof value === "object") {
+    const filteredEntries = Object.entries(value).reduce((accumulator, [key, item]) => {
+      const filteredItem = filterMetadataBranch(item, normalizedQuery);
+      if (filteredItem !== undefined || normalizeSearchText(key).includes(normalizedQuery)) {
+        accumulator[key] = filteredItem === undefined ? item : filteredItem;
+      }
+      return accumulator;
+    }, {});
+    if (Object.keys(filteredEntries).length > 0) {
+      return filteredEntries;
+    }
+    return flattenSearchValue(value).toLowerCase().includes(normalizedQuery) ? value : undefined;
+  }
+
+  return normalizeSearchText(value).includes(normalizedQuery) ? value : undefined;
+}
+
+function matchesMetadataPrimitive(value, normalizedQuery) {
+  return normalizeSearchText(value).includes(normalizedQuery);
+}
+
+function matchesMetadataComposite(key, value, normalizedQuery) {
+  return normalizeSearchText(key).includes(normalizedQuery) || flattenSearchValue(value).includes(normalizedQuery);
 }
 
 function TurnContent({ turn }) {
