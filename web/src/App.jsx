@@ -404,6 +404,10 @@ export default function App() {
             <div className="graph-header-copy">
               <h2>Living graph</h2>
               <p>{graphSummary}</p>
+              <div className="graph-legend">
+                <span className="graph-legend-swatch" aria-hidden="true" />
+                <span>Hue = node or edge type, node brightness = visible connectivity</span>
+              </div>
             </div>
             <label className="graph-search">
               <span>Search graph</span>
