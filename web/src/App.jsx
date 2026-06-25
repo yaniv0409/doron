@@ -18,6 +18,7 @@ export default function App() {
   const [sessions, setSessions] = useState([]);
   const [activeSession, setActiveSession] = useState(null);
   const [graph, setGraph] = useState(EMPTY_GRAPH);
+  const [graphSearchQuery, setGraphSearchQuery] = useState("");
   const [inspectedItem, setInspectedItem] = useState(null);
   const [sessionName, setSessionName] = useState("");
   const [useDedicatedDb, setUseDedicatedDb] = useState(false);
@@ -51,10 +52,13 @@ export default function App() {
   const turns = activeSession?.turns || [];
   const pendingUserMessage = isSending ? message.trim() : "";
   const showThinkingBlock = isSending || activity.length > 0;
-  const graphSummary = useMemo(
-    () => `${graph.node_count || 0} nodes, ${graph.edge_count || 0} edges`,
-    [graph],
-  );
+  const filteredGraph = useMemo(() => filterGraph(graph, graphSearchQuery), [graph, graphSearchQuery]);
+  const graphSummary = useMemo(() => {
+    if (!graphSearchQuery.trim()) {
+      return `${graph.node_count || 0} nodes, ${graph.edge_count || 0} edges`;
+    }
+    return `${filteredGraph.node_count}/${graph.node_count || 0} nodes, ${filteredGraph.edge_count}/${graph.edge_count || 0} edges`;
+  }, [filteredGraph, graph, graphSearchQuery]);
 
   async function refreshSessions() {
     const response = await fetch(`${API_BASE}/sessions`);
@@ -378,13 +382,22 @@ export default function App() {
 
         <section className="graph-column">
           <div className="card graph-header">
-            <div>
+            <div className="graph-header-copy">
               <h2>Living graph</h2>
               <p>{graphSummary}</p>
             </div>
+            <label className="graph-search">
+              <span>Search graph</span>
+              <input
+                type="search"
+                value={graphSearchQuery}
+                onChange={(event) => setGraphSearchQuery(event.target.value)}
+                placeholder="Search nodes, edges, ids, properties..."
+              />
+            </label>
           </div>
           <div className="card graph-wrap">
-            <GraphPanel graph={graph} onInspect={setInspectedItem} />
+            <GraphPanel graph={filteredGraph} onInspect={setInspectedItem} />
           </div>
           <div className="card inspector">
             <h3>Metadata inspector</h3>
@@ -500,6 +513,84 @@ function toDisplayLimit(value) {
     return "-";
   }
   return String(value);
+}
+
+function filterGraph(graph, query) {
+  const normalizedQuery = normalizeSearchText(query);
+  if (!normalizedQuery) {
+    return graph;
+  }
+
+  const matchingNodeIds = new Set();
+  const includedNodeIds = new Set();
+  const matchingEdgeIds = new Set();
+
+  for (const node of graph.nodes) {
+    if (matchesGraphItem(node, normalizedQuery, "node")) {
+      matchingNodeIds.add(node.id);
+      includedNodeIds.add(node.id);
+    }
+  }
+
+  for (const edge of graph.edges) {
+    if (matchesGraphItem(edge, normalizedQuery, "edge")) {
+      matchingEdgeIds.add(edge.id);
+      includedNodeIds.add(edge.source);
+      includedNodeIds.add(edge.target);
+    }
+  }
+
+  const nodes = graph.nodes.filter((node) => includedNodeIds.has(node.id));
+  const visibleNodeIds = new Set(nodes.map((node) => node.id));
+  const edges = graph.edges.filter((edge) => {
+    if (matchingEdgeIds.has(edge.id)) {
+      return visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target);
+    }
+    return visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target);
+  });
+
+  return {
+    ...graph,
+    node_count: nodes.length,
+    edge_count: edges.length,
+    nodes,
+    edges,
+  };
+}
+
+function matchesGraphItem(item, normalizedQuery, type) {
+  return serializeGraphItem(item, type).includes(normalizedQuery);
+}
+
+function serializeGraphItem(item, type) {
+  if (type === "node") {
+    return normalizeSearchText([item.id, item.label, item.kind, flattenSearchValue(item.properties)].join(" "));
+  }
+  return normalizeSearchText(
+    [item.id, item.label, item.source, item.target, flattenSearchValue(item.properties)].join(" "),
+  );
+}
+
+function flattenSearchValue(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => flattenSearchValue(item)).join(" ");
+  }
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .map(([key, item]) => `${key} ${flattenSearchValue(item)}`)
+      .join(" ");
+  }
+  return String(value);
+}
+
+function normalizeSearchText(value) {
+  return String(value || "").trim().toLowerCase();
 }
 
 function TurnContent({ turn }) {
