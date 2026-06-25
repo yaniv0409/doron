@@ -402,6 +402,7 @@ class SessionTurn(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
     trace_id: str | None = None
     status: str = "completed"
+    result_format: ResultFormat = ResultFormat.TEXT
     web_tool_call_limit_used: int | None = None
     completion: CompletionMetadata | None = None
 

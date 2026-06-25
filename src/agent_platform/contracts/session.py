@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from agent_platform.contracts.api import MissionRunError
+from agent_platform.domain.enums import ResultFormat
 from agent_platform.domain.models import CompletionMetadata
 
 
@@ -46,6 +47,7 @@ class SessionTurnResponse(BaseModel):
     created_at: str
     trace_id: str | None = None
     status: str
+    result_format: ResultFormat = ResultFormat.TEXT
     web_tool_call_limit_used: int | None = None
     completion: CompletionMetadata | None = None
 
@@ -78,6 +80,7 @@ class SessionChatResponse(BaseModel):
     trace_id: str
     status: str
     assistant_message: str
+    result_format: ResultFormat = ResultFormat.TEXT
     web_tool_call_limit_used: int | None = None
     completion: CompletionMetadata | None = None
     error: MissionRunError | None = None

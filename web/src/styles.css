@@ -38,6 +38,11 @@ button {
   grid-template-columns: 320px 1fr;
   height: 100vh;
   overflow: hidden;
+  transition: grid-template-columns 180ms ease;
+}
+
+.app-shell.sidebar-collapsed {
+  grid-template-columns: 88px minmax(0, 1fr);
 }
 
 .sidebar,
@@ -54,6 +59,72 @@ button {
   backdrop-filter: blur(16px);
   min-height: 0;
   overflow: hidden;
+  transition:
+    padding 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
+}
+
+.sidebar-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sidebar-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+
+.sidebar-toggle-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-toggle-bars span {
+  display: block;
+  width: 18px;
+  height: 2px;
+  border-radius: 999px;
+  background: #f8fbff;
+}
+
+.sidebar-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+  transition: opacity 150ms ease;
+}
+
+.sidebar-collapsed .sidebar {
+  padding-left: 10px;
+  padding-right: 10px;
+  align-items: center;
+}
+
+.sidebar-collapsed .sidebar-top {
+  width: 100%;
+  justify-content: center;
+}
+
+.sidebar-collapsed .brand,
+.sidebar-collapsed .sidebar-body {
+  display: none;
+}
+
+.sidebar-collapsed .sidebar-toggle {
+  margin: 0;
 }
 
 .workspace {
@@ -320,6 +391,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-height: 0;
 }
 
 .thinking-label {
@@ -333,6 +405,11 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  height: clamp(260px, 34vh, 420px);
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
 }
 
 .activity-line {
@@ -480,6 +557,10 @@ button:disabled {
     overflow: visible;
   }
 
+  .app-shell.sidebar-collapsed {
+    grid-template-columns: 1fr;
+  }
+
   .chat-header,
   .composer-controls,
   .settings-inline {
@@ -491,5 +572,9 @@ button:disabled {
   .chat-column,
   .graph-column {
     overflow: visible;
+  }
+
+  .activity-log {
+    height: clamp(220px, 30vh, 320px);
   }
 }

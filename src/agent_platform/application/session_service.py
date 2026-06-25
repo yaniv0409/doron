@@ -11,6 +11,7 @@ from agent_platform.application.context_compression import ContextCompressor
 from agent_platform.application.mission_service import MissionService
 from agent_platform.config.settings import AppSettings
 from agent_platform.contracts.session import SessionChatRequest, SessionOpenRequest, SessionUpdateRequest
+from agent_platform.domain.enums import ResultFormat
 from agent_platform.domain.models import (
     CompletionMetadata,
     CompressedMemory,
@@ -124,7 +125,7 @@ class SessionService:
         request: SessionChatRequest,
         *,
         event_hook: Callable[[dict[str, Any]], None] | None = None,
-    ) -> tuple[ResearchSession, str, str, MissionError | None, int | None, CompletionMetadata | None]:
+    ) -> tuple[ResearchSession, str, str, MissionError | None, int | None, CompletionMetadata | None, ResultFormat]:
         session = self._require(session_id)
         message_id = str(uuid.uuid4())
         user_turn = SessionTurn(
@@ -179,6 +180,7 @@ class SessionService:
             content=assistant_message,
             trace_id=result.trace_id,
             status=result.status.value,
+            result_format=result.result_format,
             web_tool_call_limit_used=mission_request.web_tool_call_limit,
             completion=result.completion,
         )
@@ -206,6 +208,7 @@ class SessionService:
                         "trace_id": result.trace_id,
                         "assistant_message": assistant_message,
                         "status": result.status.value,
+                        "result_format": result.result_format.value,
                         "web_tool_call_limit_used": mission_request.web_tool_call_limit,
                         "completion": result.completion.model_dump(mode="json") if result.completion else None,
                         "error": _error_payload(result.error),
@@ -231,6 +234,7 @@ class SessionService:
             result.error,
             mission_request.web_tool_call_limit,
             result.completion,
+            result.result_format,
         )
 
     def _build_mission_request(
@@ -239,10 +243,11 @@ class SessionService:
         request: SessionChatRequest,
         context_state: SessionAgentContext,
     ) -> MissionRequest:
+        output_schema = request.output_schema if request.output_schema is not None else session.output_schema
         return MissionRequest(
-            prompt=self._build_prompt(session, context_state, request.message.strip()),
+            prompt=self._build_prompt(session, context_state, request.message.strip(), output_schema=output_schema),
             db_path=session.db_path,
-            output_schema=request.output_schema if request.output_schema is not None else session.output_schema,
+            output_schema=output_schema,
             preferred_model=request.preferred_model if request.preferred_model is not None else session.preferred_model,
             allowed_models=request.allowed_models if request.allowed_models is not None else session.allowed_models,
             mission_metadata={"session_id": session.session_id, "session_name": session.name},
@@ -253,7 +258,14 @@ class SessionService:
             web_tool_call_limit=self._resolve_web_tool_limit(session, request),
         )
 
-    def _build_prompt(self, session: ResearchSession, context_state: SessionAgentContext, message: str) -> str:
+    def _build_prompt(
+        self,
+        session: ResearchSession,
+        context_state: SessionAgentContext,
+        message: str,
+        *,
+        output_schema: dict[str, Any] | None,
+    ) -> str:
         current_message_id = context_state.current_mission_message_id
         historical_turns = [turn for turn in context_state.active_turns if turn.message_id != current_message_id]
         lines = [
@@ -263,6 +275,8 @@ class SessionService:
             "Current mission:",
             message,
         ]
+        if output_schema is None:
+            lines.append("Final answer format: markdown.")
         if context_state.compression_notice:
             lines.append(f"Compaction notice: {context_state.compression_notice}")
         lines.extend(self._build_compacted_context_lines(context_state.compressed_memory))
@@ -430,7 +444,12 @@ class SessionService:
         )
 
     def _estimate_context_size(self, session: ResearchSession, context_state: SessionAgentContext) -> int:
-        prompt = self._build_prompt(session, context_state, self._current_mission_text(context_state, ""))
+        prompt = self._build_prompt(
+            session,
+            context_state,
+            self._current_mission_text(context_state, ""),
+            output_schema=session.output_schema,
+        )
         return len(prompt)
 
     def _build_summary(self, trace: ExecutionTrace | None, session: ResearchSession) -> SessionSummary:

@@ -61,7 +61,10 @@ async def update_session(session_id: str, request: SessionUpdateRequest, http_re
 async def chat(session_id: str, request: SessionChatRequest, http_request: Request) -> SessionChatResponse:
     service: SessionService = http_request.app.state.session_service
     try:
-        session, trace_id, assistant_message, error, web_limit, completion = await service.run_chat(session_id, request)
+        session, trace_id, assistant_message, error, web_limit, completion, result_format = await service.run_chat(
+            session_id,
+            request,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": str(exc)}) from exc
     return SessionChatResponse(
@@ -69,6 +72,7 @@ async def chat(session_id: str, request: SessionChatRequest, http_request: Reque
         trace_id=trace_id,
         status="failed" if error else "completed",
         assistant_message=assistant_message,
+        result_format=result_format,
         web_tool_call_limit_used=web_limit,
         completion=completion,
         error=_mission_error(error),
@@ -104,7 +108,7 @@ async def _stream_chat(service: SessionService, session_id: str, request: Sessio
 
     async def runner() -> None:
         try:
-            session, trace_id, assistant_message, error, web_limit, completion = await service.run_chat(
+            session, trace_id, assistant_message, error, web_limit, completion, result_format = await service.run_chat(
                 session_id,
                 request,
                 event_hook=event_hook,
@@ -129,6 +133,7 @@ async def _stream_chat(service: SessionService, session_id: str, request: Sessio
                         "trace_id": trace_id,
                         "assistant_message": assistant_message,
                         "status": "failed" if error else "completed",
+                        "result_format": result_format.value,
                         "web_tool_call_limit_used": web_limit,
                         "completion": completion.model_dump(mode="json") if completion else None,
                         "error": _error_payload(error),
@@ -190,6 +195,7 @@ def _session_detail(session: ResearchSession) -> SessionDetailResponse:
                 created_at=item.created_at.isoformat(),
                 trace_id=item.trace_id,
                 status=item.status,
+                result_format=item.result_format,
                 web_tool_call_limit_used=item.web_tool_call_limit_used,
                 completion=item.completion,
             )

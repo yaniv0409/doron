@@ -121,7 +121,10 @@ def build_output_repair_prompt(context: RuntimeContext, raw_output: str, validat
 
 def _build_output_format_lines(schema: dict[str, Any] | None) -> list[str]:
     if schema is None:
-        return ["If no output schema exists, return concise plain text."]
+        return [
+            "If no output schema exists, return the final answer in markdown.",
+            "Use normal markdown structure for prose, lists, tables, links, and code when helpful.",
+        ]
     return [
         "The final answer is structured and will be validated by the runtime.",
         "Return only the final answer content and do not add markdown or commentary.",

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ReactMarkdown } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
@@ -27,10 +27,26 @@ export default function App() {
   const [activity, setActivity] = useState([]);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState("");
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") {
+      return true;
+    }
+    const savedValue = window.localStorage.getItem("doron.sidebarCollapsed");
+    if (savedValue === null) {
+      return true;
+    }
+    return savedValue === "1";
+  });
+  const activityLogRef = useRef(null);
+  const followActivityRef = useRef(true);
 
   useEffect(() => {
     void refreshSessions();
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("doron.sidebarCollapsed", isSidebarCollapsed ? "1" : "0");
+  }, [isSidebarCollapsed]);
 
   const turns = activeSession?.turns || [];
   const pendingUserMessage = isSending ? message.trim() : "";
@@ -61,6 +77,23 @@ export default function App() {
     setActivity([]);
     setError("");
   }
+
+  useEffect(() => {
+    if (showThinkingBlock) {
+      followActivityRef.current = true;
+    }
+  }, [showThinkingBlock]);
+
+  useEffect(() => {
+    if (!showThinkingBlock || !followActivityRef.current) {
+      return;
+    }
+    const container = activityLogRef.current;
+    if (!container) {
+      return;
+    }
+    container.scrollTop = container.scrollHeight;
+  }, [activity, showThinkingBlock]);
 
   async function refreshGraph(sessionId) {
     const response = await fetch(`${API_BASE}/sessions/${sessionId}/graph`);
@@ -155,52 +188,69 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <h1>Doron</h1>
-          <p>Research sessions with live graph memory.</p>
+    <div className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+      <aside className={`sidebar ${isSidebarCollapsed ? "collapsed" : ""}`}>
+        <div className="sidebar-top">
+          <div className="brand">
+            <h1>Doron</h1>
+            <p>Research sessions with live graph memory.</p>
+          </div>
+          <button
+            className="sidebar-toggle"
+            aria-expanded={!isSidebarCollapsed}
+            aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            onClick={() => setIsSidebarCollapsed((value) => !value)}
+            type="button"
+          >
+            <span aria-hidden="true" className="sidebar-toggle-bars">
+              <span />
+              <span />
+              <span />
+            </span>
+          </button>
         </div>
 
-        <form className="card form-stack" onSubmit={openSession}>
-          <label>
-            Session name
-            <input value={sessionName} onChange={(event) => setSessionName(event.target.value)} required />
-          </label>
-          <label className="checkbox">
-            <input
-              checked={useDedicatedDb}
-              type="checkbox"
-              onChange={(event) => setUseDedicatedDb(event.target.checked)}
-            />
-            Use dedicated project DB
-          </label>
-          <label>
-            Session web limit
-            <input
-              type="number"
-              min="0"
-              value={sessionWebLimit}
-              onChange={(event) => setSessionWebLimit(event.target.value)}
-              placeholder="shared default"
-            />
-          </label>
-          <button type="submit">Open or resume</button>
-        </form>
+        <div className="sidebar-body">
+          <form className="card form-stack" onSubmit={openSession}>
+            <label>
+              Session name
+              <input value={sessionName} onChange={(event) => setSessionName(event.target.value)} required />
+            </label>
+            <label className="checkbox">
+              <input
+                checked={useDedicatedDb}
+                type="checkbox"
+                onChange={(event) => setUseDedicatedDb(event.target.checked)}
+              />
+              Use dedicated project DB
+            </label>
+            <label>
+              Session web limit
+              <input
+                type="number"
+                min="0"
+                value={sessionWebLimit}
+                onChange={(event) => setSessionWebLimit(event.target.value)}
+                placeholder="shared default"
+              />
+            </label>
+            <button type="submit">Open or resume</button>
+          </form>
 
-        <div className="card session-list">
-          <h2>Sessions</h2>
-          {sessions.map((session) => (
-            <button
-              className={`session-item ${activeSession?.session_id === session.session_id ? "active" : ""}`}
-              key={session.session_id}
-              onClick={() => loadSession(session.session_id)}
-              type="button"
-            >
-              <span>{session.name}</span>
-              <small>{session.uses_dedicated_db ? "Dedicated DB" : "Shared DB"}</small>
-            </button>
-          ))}
+          <div className="card session-list">
+            <h2>Sessions</h2>
+            {sessions.map((session) => (
+              <button
+                className={`session-item ${activeSession?.session_id === session.session_id ? "active" : ""}`}
+                key={session.session_id}
+                onClick={() => loadSession(session.session_id)}
+                type="button"
+              >
+                <span>{session.name}</span>
+                <small>{session.uses_dedicated_db ? "Dedicated DB" : "Shared DB"}</small>
+              </button>
+            ))}
+          </div>
         </div>
       </aside>
 
@@ -256,7 +306,19 @@ export default function App() {
                 </header>
                 <div className="thinking-shell">
                   <div className="thinking-label">Live activity</div>
-                  <div className="activity-log">
+                  <div
+                    className="activity-log"
+                    onScroll={() => {
+                      const container = activityLogRef.current;
+                      if (!container) {
+                        return;
+                      }
+                      const distanceFromBottom =
+                        container.scrollHeight - container.scrollTop - container.clientHeight;
+                      followActivityRef.current = distanceFromBottom <= 24;
+                    }}
+                    ref={activityLogRef}
+                  >
                     {activity.map((item) =>
                       item.kind === "tool" ? (
                         <details className={`activity-item tool ${item.status}`} key={item.id}>
@@ -281,6 +343,7 @@ export default function App() {
                         </div>
                       ),
                     )}
+                    <div aria-hidden="true" />
                   </div>
                 </div>
               </article>

@@ -22,3 +22,6 @@ ENV/
 logs/
 traces/
 config/models.json
+
+dbs/*
+sessions/*

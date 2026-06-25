@@ -289,6 +289,7 @@ class MissionService:
             lines.append("Return a complete response that satisfies the schema.")
         elif result_format is ResultFormat.TEXT:
             lines.append("Continue the prose answer from the cutoff point without repeating the already-written part.")
+            lines.append("Return the completed final answer in markdown.")
         lines.append("Previous partial answer:")
         lines.append(self._stringify_output(previous_output))
         return "\n".join(lines)
