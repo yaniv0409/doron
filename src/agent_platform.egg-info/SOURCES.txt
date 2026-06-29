@@ -50,6 +50,7 @@ src/agent_platform/infrastructure/logging.py
 src/agent_platform/infrastructure/maintenance_job_store.py
 src/agent_platform/infrastructure/model_catalog.py
 src/agent_platform/infrastructure/openrouter_client.py
+src/agent_platform/infrastructure/session_context_store.py
 src/agent_platform/infrastructure/session_store.py
 src/agent_platform/infrastructure/trace_store.py
 src/agent_platform/tools/__init__.py
@@ -71,7 +72,9 @@ tests/test_context_compression.py
 tests/test_db_snapshot_api.py
 tests/test_db_snapshot_service.py
 tests/test_docs_lookup.py
+tests/test_graph_snapshot_service.py
 tests/test_kuzu_client.py
+tests/test_live_events.py
 tests/test_logging.py
 tests/test_maintenance_runner.py
 tests/test_memory_manager.py

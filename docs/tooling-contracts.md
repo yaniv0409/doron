@@ -22,7 +22,8 @@ Requirements:
 
 Requirements:
 
-- mission-scoped browser lifecycle
+- `browser_text` uses the mission-scoped browser page and can lazy-start it on first use
+- `browser_open` fetches each URL in its own short-lived Playwright session and closes that session after extraction
 - look like a normal desktop browser session using built-in Playwright context settings
 - enforce a dedicated browser navigation timeout with a 15-second default
 - wait for `domcontentloaded` and then `networkidle`
@@ -33,7 +34,8 @@ Requirements:
 - cap browser tool usage at 20 calls per mission by default
 - require a short reason on every tool call
 - log visited URLs and extraction summaries
-- write browser-stage progress events so stalls can be attributed to navigation, `networkidle`, or extraction
+- write browser-stage progress events for the mission-scoped browser so stalls can be attributed to navigation, `networkidle`, or extraction
+- emit batch-level browser events for `browser_open` start, completion, and per-URL success/failure
 - prefer structured tool results so recoverable browser issues can be reasoned about by the agent
 
 ## Mission stream

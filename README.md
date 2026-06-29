@@ -1,6 +1,6 @@
-# Agent Platform
+# Doron
 
-Generic agent platform scaffold built around:
+Doron is a generic agent scaffold built around:
 
 - `pydantic-ai` for orchestration
 - Kuzu for graph persistence
@@ -24,7 +24,9 @@ Web extraction behavior:
 - cleaned readable page text without HTML tags
 - structured extracted links from the rendered page
 - visible `web_search(query, reason)` discovery tool with compact search hits
+- `browser_text(reason)` uses the mission-scoped browser page and lazily starts it on first use
 - batch `browser_open(urls)` fetches multiple URLs in parallel with a configurable worker pool
+- each `browser_open` URL is fetched in its own short-lived Playwright session and closed after extraction
 - batch results preserve input order and may contain partial failures
 - browser tools are capped at 20 calls per mission by default, and every tool call carries a reason
 
@@ -54,15 +56,17 @@ The script is interactive and reusable. It will:
 - write `config/models.json`
 - create or reuse `.venv`
 - install Python dependencies
+- install web dependencies under `web/`
 - install the selected Playwright browser
 
 Manual path:
 
 1. Create a virtualenv.
 2. Install dependencies with `pip install -e ".[dev]"`.
-3. Install Playwright browsers with `playwright install chromium`.
-4. Set `OPENROUTER_API_KEY`.
-5. Run the API:
+3. Install web dependencies with `cd web && npm install`.
+4. Install Playwright browsers with `playwright install chromium`.
+5. Set `OPENROUTER_API_KEY`.
+6. Run the API:
 
 ```bash
 uvicorn agent_platform.api.app:create_app --factory --reload

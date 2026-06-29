@@ -2,13 +2,13 @@
 
 ## Goal
 
-This repository is a generic agent platform scaffold.
+This repository is Doron, a generic agent scaffold.
 
 Core runtime:
 
 - `pydantic-ai` orchestrates mission execution
 - Kuzu provides mutable graph persistence from a caller-supplied database path
-- Playwright provides mission-scoped browser automation
+- Playwright provides a mission-scoped browser page for text extraction, while `browser_open` uses short-lived per-URL Playwright sessions for batched fetches
 - OpenRouter provides chat models and embeddings
 
 ## Design rules
@@ -26,7 +26,7 @@ Core runtime:
 2. Session requests load durable session JSON, resolve the shared or dedicated DB path, and build a mission prompt from recent chat plus stored summary.
 3. `MissionService` builds a mission-scoped runtime.
 4. `AgentFactory` creates a `pydantic-ai` agent for the current model.
-5. The agent uses explicit tools for graph work, browser work, documentation lookup, and model switching.
+5. The agent uses explicit tools for graph work, browser work, documentation lookup, and model switching. `browser_text` reads from the mission browser page; `browser_open` fetches URL batches in isolated short-lived sessions.
 6. Structured output is validated against caller-provided JSON Schema.
 7. Logs, session artifacts, and a normalized trace are written to disk.
 8. When enabled, the main mission enqueues a durable skill-maintenance job and a `MaintenanceRunner` resumes it from persisted state.

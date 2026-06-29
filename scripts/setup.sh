@@ -39,6 +39,23 @@ require_command() {
   fi
 }
 
+needs_web_deps_install() {
+  local web_dir="$ROOT_DIR/web"
+  local vite_bin="$web_dir/node_modules/.bin/vite"
+  local lockfile="$web_dir/package-lock.json"
+  local manifest="$web_dir/package.json"
+
+  if [[ ! -x "$vite_bin" ]]; then
+    return 0
+  fi
+
+  if [[ "$manifest" -nt "$vite_bin" || "$lockfile" -nt "$vite_bin" ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
 load_existing_config() {
   if [[ -f "$ENV_FILE" ]]; then
     log "loading existing environment from $ENV_FILE"
@@ -264,6 +281,21 @@ install_python_deps() {
   "$VENV_DIR/bin/pip" install -e "$extras"
 }
 
+install_web_deps() {
+  require_command npm
+
+  if ! needs_web_deps_install; then
+    log "using existing web dependencies in $ROOT_DIR/web"
+    return
+  fi
+
+  log "installing web dependencies in $ROOT_DIR/web"
+  (
+    cd "$ROOT_DIR/web"
+    npm install
+  )
+}
+
 install_playwright() {
   if [[ "$INSTALL_PLAYWRIGHT" != "yes" ]]; then
     log "skipping Playwright browser installation"
@@ -295,6 +327,7 @@ EOF
 
 main() {
   require_command "$PYTHON_BIN"
+  require_command npm
   load_existing_config
   collect_configuration
   validate_configuration
@@ -302,6 +335,7 @@ main() {
   write_models_file
   create_venv
   install_python_deps
+  install_web_deps
   install_playwright
   print_summary
 }
