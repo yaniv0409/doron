@@ -6,6 +6,11 @@ class MissionStatus(str, Enum):
     FAILED = "failed"
 
 
+class SessionStopMode(str, Enum):
+    SOFT = "soft"
+    HARD = "hard"
+
+
 class MaintenanceJobStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"

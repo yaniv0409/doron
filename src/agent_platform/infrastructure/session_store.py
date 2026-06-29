@@ -89,4 +89,9 @@ def _build_summary(session: ResearchSession) -> ResearchSessionSummary:
         created_at=session.created_at,
         updated_at=session.updated_at,
         last_trace_id=session.summary.last_trace_id,
+        stop_mode=session.stop_mode,
+        stop_reason=session.stop_reason,
+        stop_requested_at=session.stop_requested_at,
+        stopped_at=session.stopped_at,
+        is_closed=session.is_closed,
     )

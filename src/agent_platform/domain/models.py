@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from agent_platform.domain.enums import MaintenanceJobStatus, MissionStatus, ResultFormat
+from agent_platform.domain.enums import MaintenanceJobStatus, MissionStatus, ResultFormat, SessionStopMode
 
 
 def utc_now() -> datetime:
@@ -424,6 +424,11 @@ class ResearchSessionSummary(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
     last_trace_id: str | None = None
+    stop_mode: SessionStopMode | None = None
+    stop_reason: str | None = None
+    stop_requested_at: datetime | None = None
+    stopped_at: datetime | None = None
+    is_closed: bool = False
 
 
 class SessionAgentContext(BaseModel):
@@ -449,6 +454,11 @@ class ResearchSession(BaseModel):
     web_enabled: bool = True
     db_mutation_enabled: bool = True
     web_tool_call_limit: int | None = Field(default=None, ge=0)
+    stop_mode: SessionStopMode | None = None
+    stop_reason: str | None = None
+    stop_requested_at: datetime | None = None
+    stopped_at: datetime | None = None
+    is_closed: bool = False
     turns: list[SessionTurn] = Field(default_factory=list)
     summary: SessionSummary = Field(default_factory=SessionSummary)
     last_error: MissionError | None = None

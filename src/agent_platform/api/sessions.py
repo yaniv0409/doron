@@ -16,6 +16,7 @@ from agent_platform.contracts.session import (
     SessionChatResponse,
     SessionDetailResponse,
     SessionGraphResponse,
+    SessionStopRequest,
     SessionSummaryResponse,
     SessionOpenRequest,
     SessionTurnResponse,
@@ -72,6 +73,26 @@ async def update_session(session_id: str, request: SessionUpdateRequest, http_re
     service: SessionService = http_request.app.state.session_service
     try:
         session = service.update(session_id, request)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": str(exc)}) from exc
+    return _session_detail(session, turn_limit=12)
+
+
+@router.post("/sessions/{session_id}/stop", response_model=SessionDetailResponse)
+async def stop_session(session_id: str, request: SessionStopRequest, http_request: Request) -> SessionDetailResponse:
+    service: SessionService = http_request.app.state.session_service
+    try:
+        session = service.stop(session_id, request)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": str(exc)}) from exc
+    return _session_detail(session, turn_limit=12)
+
+
+@router.post("/sessions/{session_id}/resume", response_model=SessionDetailResponse)
+async def resume_session(session_id: str, http_request: Request) -> SessionDetailResponse:
+    service: SessionService = http_request.app.state.session_service
+    try:
+        session = service.resume(session_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": str(exc)}) from exc
     return _session_detail(session, turn_limit=12)
@@ -194,6 +215,11 @@ def _session_summary(session: ResearchSession) -> SessionSummaryResponse:
             updated_at=session.updated_at.isoformat(),
             created_at=session.created_at.isoformat(),
             last_trace_id=session.last_trace_id,
+            stop_mode=session.stop_mode,
+            stop_reason=session.stop_reason,
+            stop_requested_at=session.stop_requested_at.isoformat() if session.stop_requested_at else None,
+            stopped_at=session.stopped_at.isoformat() if session.stopped_at else None,
+            is_closed=getattr(session, "is_closed", False),
         )
     return SessionSummaryResponse(
         session_id=session.session_id,
@@ -204,6 +230,11 @@ def _session_summary(session: ResearchSession) -> SessionSummaryResponse:
         updated_at=session.updated_at.isoformat(),
         created_at=session.created_at.isoformat(),
         last_trace_id=session.summary.last_trace_id,
+        stop_mode=session.stop_mode,
+        stop_reason=session.stop_reason,
+        stop_requested_at=session.stop_requested_at.isoformat() if session.stop_requested_at else None,
+        stopped_at=session.stopped_at.isoformat() if session.stopped_at else None,
+        is_closed=session.is_closed,
     )
 
 

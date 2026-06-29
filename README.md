@@ -14,6 +14,7 @@ Research workspace features:
 - shared or dedicated graph databases under `dbs/`
 - live per-request SSE streaming for mission progress and tool activity
 - session-scoped web browsing tool limits with per-message overrides
+- session stop controls for soft wrap-up requests and hard session cancellation
 - a React web UI under `web/` with chat, sessions, and graph inspection
 
 Web extraction behavior:
@@ -113,6 +114,14 @@ Stream mode emits live mission progress, tool events, and the final result over 
 `PATCH /sessions/{session_id}`
 
 - update session defaults such as `web_tool_call_limit`
+
+`POST /sessions/{session_id}/stop`
+
+- persist a soft wrap-up request or hard-stop the session
+
+`POST /sessions/{session_id}/resume`
+
+- clear the stop state and reopen a stopped session
 
 `POST /sessions/{session_id}/chat`
 

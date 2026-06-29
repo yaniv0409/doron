@@ -163,6 +163,42 @@ export default function App() {
     [refreshSessions],
   );
 
+  const stopSession = useCallback(
+    async (sessionId, mode) => {
+      const response = await fetch(`${API_BASE}/sessions/${sessionId}/stop`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setError(readError(payload));
+        return false;
+      }
+      setActiveSession(payload);
+      await Promise.all([refreshSessions().catch(() => {}), refreshGraph(sessionId).catch(() => {})]);
+      return true;
+    },
+    [refreshGraph, refreshSessions],
+  );
+
+  const resumeSession = useCallback(
+    async (sessionId) => {
+      const response = await fetch(`${API_BASE}/sessions/${sessionId}/resume`, {
+        method: "POST",
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setError(readError(payload));
+        return false;
+      }
+      setActiveSession(payload);
+      await Promise.all([refreshSessions().catch(() => {}), refreshGraph(sessionId).catch(() => {})]);
+      return true;
+    },
+    [refreshGraph, refreshSessions],
+  );
+
   const loadOlderTurns = useCallback(
     async (sessionId, beforeMessageId) => {
       if (!beforeMessageId) {
@@ -298,6 +334,8 @@ export default function App() {
           isSending={isSending}
           onLoadOlderTurns={loadOlderTurns}
           onSaveSessionSettings={saveSessionSettings}
+          onResumeSession={resumeSession}
+          onStopSession={stopSession}
           onSendMessage={sendMessage}
           showThinkingBlock={showThinkingBlock}
           turns={turns}
@@ -375,7 +413,7 @@ function SessionSidebar({ activeSessionId, onOpenSession, onSelectSession, sessi
               type="button"
             >
               <span>{session.name}</span>
-              <small>{session.uses_dedicated_db ? "Dedicated DB" : "Shared DB"}</small>
+              <small>{formatSessionStatus(session)}</small>
             </button>
           ))}
         </div>
@@ -391,6 +429,8 @@ function ChatColumn({
   isSending,
   onLoadOlderTurns,
   onSaveSessionSettings,
+  onResumeSession,
+  onStopSession,
   onSendMessage,
   showThinkingBlock,
   turns,
@@ -403,9 +443,11 @@ function ChatColumn({
           <p>{activeSession?.db_path || "Open a session to begin."}</p>
         </div>
         {activeSession ? (
-          <SessionLimitEditor
+          <SessionControls
             activeSession={activeSession}
+            onResumeSession={onResumeSession}
             onSaveSessionSettings={onSaveSessionSettings}
+            onStopSession={onStopSession}
           />
         ) : null}
       </div>
@@ -511,6 +553,32 @@ function SessionLimitEditor({ activeSession, onSaveSessionSettings }) {
   );
 }
 
+function SessionControls({ activeSession, onResumeSession, onSaveSessionSettings, onStopSession }) {
+  const isStopped = Boolean(activeSession.stop_mode) || activeSession.is_closed;
+  return (
+    <div className="session-controls">
+      <SessionLimitEditor activeSession={activeSession} onSaveSessionSettings={onSaveSessionSettings} />
+      <div className="stop-actions">
+        {isStopped ? (
+          <button type="button" onClick={() => onResumeSession(activeSession.session_id)}>
+            Resume
+          </button>
+        ) : null}
+        {!activeSession.is_closed ? (
+          <>
+            <button type="button" onClick={() => onStopSession(activeSession.session_id, "soft")}>
+              Soft stop
+            </button>
+            <button type="button" className="danger" onClick={() => onStopSession(activeSession.session_id, "hard")}>
+              Hard stop
+            </button>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function Composer({ activeSession, isSending, onSendMessage }) {
   const [message, setMessage] = useState("");
   const [messageWebLimit, setMessageWebLimit] = useState("");
@@ -534,7 +602,7 @@ function Composer({ activeSession, isSending, onSendMessage }) {
   return (
     <form className="composer card" onSubmit={handleSubmit}>
       <textarea
-        disabled={!activeSession || isSending}
+        disabled={!activeSession || isSending || activeSession.is_closed}
         value={message}
         onChange={(event) => setMessage(event.target.value)}
         placeholder="Ask Doron to research, compare, inspect, or write into the graph..."
@@ -544,7 +612,7 @@ function Composer({ activeSession, isSending, onSendMessage }) {
         <label>
           Message web limit
           <input
-            disabled={!activeSession || isSending}
+            disabled={!activeSession || isSending || activeSession.is_closed}
             type="number"
             min="0"
             value={messageWebLimit}
@@ -552,8 +620,8 @@ function Composer({ activeSession, isSending, onSendMessage }) {
             placeholder="use session default"
           />
         </label>
-        <button disabled={!activeSession || isSending} type="submit">
-          {isSending ? "Running..." : "Send"}
+        <button disabled={!activeSession || isSending || activeSession.is_closed} type="submit">
+          {activeSession?.is_closed ? "Stopped" : isSending ? "Running..." : "Send"}
         </button>
       </div>
     </form>
@@ -798,6 +866,16 @@ function toNullableNumber(value) {
     return null;
   }
   return Number(value);
+}
+
+function formatSessionStatus(session) {
+  const statusBits = [session.uses_dedicated_db ? "Dedicated DB" : "Shared DB"];
+  if (session.is_closed) {
+    statusBits.push("Hard stopped");
+  } else if (session.stop_mode === "soft") {
+    statusBits.push("Soft stop");
+  }
+  return statusBits.join(" • ");
 }
 
 function extendJsonViewStyles(baseStyles, additions) {

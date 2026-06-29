@@ -5,7 +5,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from agent_platform.contracts.api import MissionRunError
-from agent_platform.domain.enums import ResultFormat
+from agent_platform.domain.enums import ResultFormat, SessionStopMode
 from agent_platform.domain.models import CompletionMetadata
 
 
@@ -38,6 +38,11 @@ class SessionSummaryResponse(BaseModel):
     updated_at: str
     created_at: str
     last_trace_id: str | None = None
+    stop_mode: SessionStopMode | None = None
+    stop_reason: str | None = None
+    stop_requested_at: str | None = None
+    stopped_at: str | None = None
+    is_closed: bool = False
 
 
 class SessionTurnPageResponse(BaseModel):
@@ -76,6 +81,11 @@ class SessionDetailResponse(SessionSummaryResponse):
     oldest_turn_message_id: str | None = None
     newest_turn_message_id: str | None = None
     last_error: MissionRunError | None = None
+
+
+class SessionStopRequest(BaseModel):
+    mode: SessionStopMode
+    reason: str | None = None
 
 
 class SessionChatRequest(BaseModel):

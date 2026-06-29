@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import uuid
@@ -10,8 +11,9 @@ from typing import Any, Callable
 from agent_platform.application.context_compression import ContextCompressor
 from agent_platform.application.mission_service import MissionService
 from agent_platform.config.settings import AppSettings
-from agent_platform.contracts.session import SessionChatRequest, SessionOpenRequest, SessionUpdateRequest
-from agent_platform.domain.enums import ResultFormat
+from agent_platform.contracts.session import SessionChatRequest, SessionOpenRequest, SessionStopRequest, SessionUpdateRequest
+from agent_platform.domain.enums import ResultFormat, SessionStopMode
+from agent_platform.domain.exceptions import RequestValidationError
 from agent_platform.domain.models import (
     CompletionMetadata,
     CompressedMemory,
@@ -53,6 +55,7 @@ class SessionService:
         self._context_store = context_store or SessionContextStore(settings.sessions)
         self._model_catalog = ModelCatalog(settings)
         self._context_compressor = ContextCompressor(settings.compression)
+        self._active_runs: dict[str, asyncio.Task[Any]] = {}
 
     def open(self, request: SessionOpenRequest) -> ResearchSession:
         normalized_name = normalize_session_name(request.name)
@@ -134,6 +137,38 @@ class SessionService:
         self._store.save(session)
         return session
 
+    def stop(self, session_id: str, request: SessionStopRequest) -> ResearchSession:
+        session = self._require(session_id)
+        now = utc_now()
+        session.stop_mode = request.mode
+        session.stop_reason = request.reason
+        session.stop_requested_at = now
+        if request.mode == SessionStopMode.HARD:
+            session.is_closed = True
+            session.stopped_at = now
+            session.last_error = MissionError(
+                code="cancelled",
+                message=request.reason or "session hard-stopped",
+            )
+            task = self._active_runs.get(session_id)
+            if task is not None and not task.done():
+                task.cancel()
+        session.updated_at = now
+        self._store.save(session)
+        return session
+
+    def resume(self, session_id: str) -> ResearchSession:
+        session = self._require(session_id)
+        session.stop_mode = None
+        session.stop_reason = None
+        session.stop_requested_at = None
+        session.stopped_at = None
+        session.is_closed = False
+        session.last_error = None
+        session.updated_at = utc_now()
+        self._store.save(session)
+        return session
+
     async def run_chat(
         self,
         session_id: str,
@@ -142,6 +177,8 @@ class SessionService:
         event_hook: Callable[[dict[str, Any]], None] | None = None,
     ) -> tuple[ResearchSession, str, str, MissionError | None, int | None, CompletionMetadata | None, ResultFormat]:
         session = self._require(session_id)
+        if session.is_closed:
+            raise RequestValidationError("session is hard-stopped; resume it before sending more messages")
         message_id = str(uuid.uuid4())
         user_turn = SessionTurn(
             message_id=message_id,
@@ -184,73 +221,113 @@ class SessionService:
         context_state = await self._compact_context_if_needed(session, mission_request, context_state)
         self._context_store.save(context_state)
         mission_request = self._build_mission_request(session, request, context_state)
-        result = await self._mission_service.run(
-            mission_request,
-            event_hook=wrapped_event_hook if event_hook is not None else None,
-        )
-        assistant_message = _stringify_result(result.result if result.error is None else result.error.message)
-        assistant_turn = SessionTurn(
-            message_id=str(uuid.uuid4()),
-            role="assistant",
-            content=assistant_message,
-            trace_id=result.trace_id,
-            status=result.status.value,
-            result_format=result.result_format,
-            web_tool_call_limit_used=mission_request.web_tool_call_limit,
-            completion=result.completion,
-        )
-        session.turns.append(assistant_turn)
-        context_state.active_turns.append(assistant_turn)
-        session.last_error = result.error
-        session.updated_at = utc_now()
-        trace = self._read_trace(result.trace_id)
-        session.summary = self._build_summary(trace, session)
-        if context_state.compression_notice:
-            session.summary.compression_notice = context_state.compression_notice
-        self._store.save(session)
-        context_state = await self._compact_context_if_needed(session, mission_request, context_state)
-        if context_state.compression_notice:
-            session.summary.compression_notice = context_state.compression_notice
+        task = asyncio.current_task()
+        if task is not None:
+            self._active_runs[session_id] = task
+        try:
+            result = await self._mission_service.run(
+                mission_request,
+                event_hook=wrapped_event_hook if event_hook is not None else None,
+            )
+            assistant_message = _stringify_result(result.result if result.error is None else result.error.message)
+            assistant_turn = SessionTurn(
+                message_id=str(uuid.uuid4()),
+                role="assistant",
+                content=assistant_message,
+                trace_id=result.trace_id,
+                status=result.status.value,
+                result_format=result.result_format,
+                web_tool_call_limit_used=mission_request.web_tool_call_limit,
+                completion=result.completion,
+            )
+            session.turns.append(assistant_turn)
+            context_state.active_turns.append(assistant_turn)
+            session.last_error = result.error
+            session.updated_at = utc_now()
+            trace = self._read_trace(result.trace_id)
+            session.summary = self._build_summary(trace, session)
+            if context_state.compression_notice:
+                session.summary.compression_notice = context_state.compression_notice
             self._store.save(session)
-        self._context_store.save(context_state)
-        if event_hook is not None:
-            event_hook(
-                {
-                    "event": "session.message.completed" if result.error is None else "session.message.failed",
-                    "data": {
-                        "session_id": session.session_id,
-                        "message_id": message_id,
-                        "trace_id": result.trace_id,
-                        "assistant_message": assistant_message,
-                        "status": result.status.value,
-                        "result_format": result.result_format.value,
-                        "web_tool_call_limit_used": mission_request.web_tool_call_limit,
-                        "completion": result.completion.model_dump(mode="json") if result.completion else None,
-                        "error": _error_payload(result.error),
-                        "created_at": utc_now().isoformat(),
-                    },
-                }
+            context_state = await self._compact_context_if_needed(session, mission_request, context_state)
+            if context_state.compression_notice:
+                session.summary.compression_notice = context_state.compression_notice
+                self._store.save(session)
+            self._context_store.save(context_state)
+            if event_hook is not None:
+                event_hook(
+                    {
+                        "event": "session.message.completed" if result.error is None else "session.message.failed",
+                        "data": {
+                            "session_id": session.session_id,
+                            "message_id": message_id,
+                            "trace_id": result.trace_id,
+                            "assistant_message": assistant_message,
+                            "status": result.status.value,
+                            "result_format": result.result_format.value,
+                            "web_tool_call_limit_used": mission_request.web_tool_call_limit,
+                            "completion": result.completion.model_dump(mode="json") if result.completion else None,
+                            "error": _error_payload(result.error),
+                            "created_at": utc_now().isoformat(),
+                        },
+                    }
+                )
+                event_hook(
+                    {
+                        "event": "session.graph.updated",
+                        "data": {
+                            "session_id": session.session_id,
+                            "message_id": message_id,
+                            "trace_id": result.trace_id,
+                            "created_at": utc_now().isoformat(),
+                        },
+                    }
+                )
+            return (
+                session,
+                result.trace_id,
+                assistant_message,
+                result.error,
+                mission_request.web_tool_call_limit,
+                result.completion,
+                result.result_format,
             )
-            event_hook(
-                {
-                    "event": "session.graph.updated",
-                    "data": {
-                        "session_id": session.session_id,
-                        "message_id": message_id,
-                        "trace_id": result.trace_id,
-                        "created_at": utc_now().isoformat(),
-                    },
-                }
+        except asyncio.CancelledError:
+            error = MissionError(code="cancelled", message=session.stop_reason or "session cancelled")
+            session.last_error = error
+            session.updated_at = utc_now()
+            self._store.save(session)
+            cancelled_trace_id = f"cancelled-{session.session_id}-{message_id}"
+            if event_hook is not None:
+                event_hook(
+                    {
+                        "event": "session.message.failed",
+                        "data": {
+                            "session_id": session.session_id,
+                            "message_id": message_id,
+                            "trace_id": cancelled_trace_id,
+                            "assistant_message": session.stop_reason or "Session stopped.",
+                            "status": "failed",
+                            "result_format": ResultFormat.TEXT.value,
+                            "web_tool_call_limit_used": mission_request.web_tool_call_limit,
+                            "completion": None,
+                            "error": _error_payload(error),
+                            "created_at": utc_now().isoformat(),
+                        },
+                    }
+                )
+            return (
+                session,
+                cancelled_trace_id,
+                session.stop_reason or "Session stopped.",
+                error,
+                mission_request.web_tool_call_limit,
+                None,
+                ResultFormat.TEXT,
             )
-        return (
-            session,
-            result.trace_id,
-            assistant_message,
-            result.error,
-            mission_request.web_tool_call_limit,
-            result.completion,
-            result.result_format,
-        )
+        finally:
+            if task is not None and self._active_runs.get(session_id) is task:
+                self._active_runs.pop(session_id, None)
 
     def _build_mission_request(
         self,
@@ -290,6 +367,16 @@ class SessionService:
             "Current mission:",
             message,
         ]
+        if session.stop_mode is not None:
+            lines.append("Session stop request:")
+            if session.stop_mode == SessionStopMode.SOFT:
+                lines.append(
+                    "Wrap up the mission, summarize progress, and avoid starting new investigative branches unless needed to finish."
+                )
+                if session.stop_reason:
+                    lines.append(f"Stop note: {session.stop_reason}")
+            else:
+                lines.append("This session has been hard-stopped and should not accept more work until it is resumed.")
         if output_schema is None:
             lines.append("Final answer format: markdown.")
         if context_state.compression_notice:

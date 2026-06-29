@@ -229,6 +229,10 @@ button:disabled {
   color: #f5f8fc;
 }
 
+.session-item small {
+  color: #a9bbcf;
+}
+
 .chat-header,
 .composer-controls,
 .settings-inline {
@@ -236,6 +240,28 @@ button:disabled {
   align-items: end;
   justify-content: space-between;
   gap: 12px;
+}
+
+.session-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: min(100%, 320px);
+}
+
+.stop-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+button.danger {
+  background: linear-gradient(135deg, #7b2d2d, #a14545);
+}
+
+button.danger:disabled {
+  opacity: 0.65;
 }
 
 .graph-header {

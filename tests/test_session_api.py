@@ -5,12 +5,19 @@ import json
 from pathlib import Path
 
 from httpx import ASGITransport, AsyncClient
+import pytest
 
 from agent_platform.api.app import create_app
 from agent_platform.application.session_service import SessionService
 from agent_platform.config.settings import AppSettings, SessionSettings
-from agent_platform.contracts.session import SessionChatRequest, SessionGraphResponse, SessionOpenRequest, SessionUpdateRequest
-from agent_platform.domain.enums import MissionStatus, ResultFormat
+from agent_platform.contracts.session import (
+    SessionChatRequest,
+    SessionGraphResponse,
+    SessionOpenRequest,
+    SessionStopRequest,
+    SessionUpdateRequest,
+)
+from agent_platform.domain.enums import MissionStatus, ResultFormat, SessionStopMode
 from agent_platform.domain.models import (
     CompressionEvent,
     CompressedMemory,
@@ -20,6 +27,7 @@ from agent_platform.domain.models import (
     MissionResult,
     utc_now,
 )
+from agent_platform.domain.exceptions import RequestValidationError
 from agent_platform.infrastructure.session_context_store import SessionContextStore
 from agent_platform.infrastructure.session_store import SessionStore
 
@@ -229,6 +237,64 @@ def test_session_prompt_prioritizes_current_mission(tmp_path: Path) -> None:
     assert prompt.index("Current mission:\nSecond mission is the main one") < prompt.index("Recent active turns:")
 
 
+def test_soft_stop_injects_wrapup_prompt_and_resumes(tmp_path: Path) -> None:
+    settings = AppSettings()
+    settings.sessions = SessionSettings(
+        directory=tmp_path / "sessions-soft-stop",
+        db_directory=tmp_path / "dbs-soft-stop",
+        shared_db_path=tmp_path / "dbs-soft-stop" / "shared.kuzu",
+    )
+    mission_service = FakeMissionService()
+    service = SessionService(settings, mission_service, SessionStore(settings.sessions))
+    session = service.open(SessionOpenRequest(name="Soft Stop Session"))
+
+    stopped = service.stop(
+        session.session_id,
+        SessionStopRequest(mode=SessionStopMode.SOFT, reason="wrap up the research"),
+    )
+    asyncio.run(service.run_chat(session.session_id, SessionChatRequest(message="Continue research")))
+
+    prompt = mission_service.requests[-1].prompt
+
+    assert stopped.stop_mode == SessionStopMode.SOFT
+    assert stopped.is_closed is False
+    assert "Session stop request:" in prompt
+    assert "Wrap up the mission" in prompt
+    assert "Stop note: wrap up the research" in prompt
+
+    resumed = service.resume(session.session_id)
+
+    assert resumed.stop_mode is None
+    assert resumed.stop_reason is None
+    assert resumed.is_closed is False
+
+
+def test_hard_stop_cancels_active_run_and_blocks_future_messages(tmp_path: Path) -> None:
+    settings = AppSettings()
+    settings.sessions = SessionSettings(
+        directory=tmp_path / "sessions-hard-stop",
+        db_directory=tmp_path / "dbs-hard-stop",
+        shared_db_path=tmp_path / "dbs-hard-stop" / "shared.kuzu",
+    )
+    mission_service = FakeMissionService()
+    service = SessionService(settings, mission_service, SessionStore(settings.sessions))
+    session = service.open(SessionOpenRequest(name="Hard Stop Session"))
+
+    stopped = service.stop(
+        session.session_id,
+        SessionStopRequest(mode=SessionStopMode.HARD, reason="hard stop now"),
+    )
+
+    assert stopped.is_closed is True
+    assert stopped.stop_mode == SessionStopMode.HARD
+    assert stopped.stop_reason == "hard stop now"
+    assert stopped.last_error is not None
+    assert stopped.last_error.code == "cancelled"
+
+    with pytest.raises(RequestValidationError):
+        asyncio.run(service.run_chat(session.session_id, SessionChatRequest(message="Try again")))
+
+
 def test_session_context_compacts_without_dropping_visible_history(tmp_path: Path) -> None:
     settings = AppSettings()
     settings.sessions = SessionSettings(
@@ -304,6 +370,46 @@ def test_session_routes_stream_and_graph(tmp_path: Path) -> None:
     assert graph_payload["node_count"] == 1
     assert detail_payload["web_tool_call_limit"] == 5
     assert detail_payload["turns"][-1]["web_tool_call_limit_used"] == 6
+
+
+def test_session_stop_routes_update_status_and_resume(tmp_path: Path) -> None:
+    async def scenario() -> dict[str, object]:
+        app = create_app()
+        settings = AppSettings()
+        settings.sessions = SessionSettings(
+            directory=tmp_path / "sessions-stop-routes",
+            db_directory=tmp_path / "dbs-stop-routes",
+            shared_db_path=tmp_path / "dbs-stop-routes" / "shared.kuzu",
+        )
+        mission_service = FakeMissionService()
+        store = SessionStore(settings.sessions)
+        app.state.session_service = SessionService(settings, mission_service, store)
+        app.state.graph_snapshot_service = FakeGraphSnapshotService()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            opened = await client.post("/sessions/open", json={"name": "Stop Routes"})
+            session_id = opened.json()["session_id"]
+            stopped = await client.post(
+                f"/sessions/{session_id}/stop",
+                json={"mode": "soft", "reason": "wrap up"},
+            )
+            resumed = await client.post(f"/sessions/{session_id}/resume")
+            detail = await client.get(f"/sessions/{session_id}")
+
+        return {
+            "stopped": stopped.json(),
+            "resumed": resumed.json(),
+            "detail": detail.json(),
+        }
+
+    payload = asyncio.run(scenario())
+    assert payload["stopped"]["stop_mode"] == "soft"
+    assert payload["stopped"]["stop_reason"] == "wrap up"
+    assert payload["stopped"]["is_closed"] is False
+    assert payload["resumed"]["stop_mode"] is None
+    assert payload["resumed"]["stop_reason"] is None
+    assert payload["resumed"]["is_closed"] is False
+    assert payload["detail"]["stop_mode"] is None
 
 
 def test_session_routes_page_turns(tmp_path: Path) -> None:
