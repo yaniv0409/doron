@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { DataSet } from "vis-data";
 import { Network } from "vis-network";
 import "vis-network/styles/vis-network.css";
@@ -10,7 +10,7 @@ const VALUE_MAX = 0.96;
 const EDGE_SATURATION = 0.56;
 const EDGE_VALUE = 0.82;
 
-export default function GraphPanel({ graph, onInspect }) {
+const GraphPanel = memo(function GraphPanel({ graph, onInspect }) {
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -95,7 +95,9 @@ export default function GraphPanel({ graph, onInspect }) {
   }, [graph, onInspect]);
 
   return <div className="graph-canvas" ref={containerRef} />;
-}
+});
+
+export default GraphPanel;
 
 function buildGraphNode(node, nodeDegrees) {
   const degree = nodeDegrees.get(node.id) || 0;

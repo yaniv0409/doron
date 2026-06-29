@@ -87,9 +87,9 @@ class KuzuGateway:
 
     def sample_rows(self, table_name: str, *, kind: str, limit: int) -> list[dict[str, Any]]:
         if kind == "REL":
-            query = f"MATCH (a)-[r:{table_name}]->(b) RETURN a, r, b LIMIT {limit};"
+            query = f"MATCH (a)-[r:{_quote_identifier(table_name)}]->(b) RETURN a, r, b LIMIT {limit};"
         else:
-            query = f"MATCH (n:{table_name}) RETURN n LIMIT {limit};"
+            query = f"MATCH (n:{_quote_identifier(table_name)}) RETURN n LIMIT {limit};"
         return self.execute(query)
 
     def _ensure_open(self) -> None:
@@ -120,3 +120,7 @@ def _normalize_result(result: Any) -> list[dict[str, Any]]:
         row = result.get_next()
         rows.append({column_names[index]: value for index, value in enumerate(row)})
     return rows
+
+
+def _quote_identifier(name: str) -> str:
+    return f"`{name.replace('`', '``')}`"

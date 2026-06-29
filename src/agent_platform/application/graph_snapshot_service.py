@@ -23,20 +23,31 @@ class GraphSnapshotService:
                 generated_at=utc_now().isoformat(),
                 node_count=0,
                 edge_count=0,
+                node_limit=self._settings.graph_node_limit,
+                edge_limit=self._settings.graph_edge_limit,
                 nodes=[],
                 edges=[],
             )
         node_map: dict[str, GraphNodeResponse] = {}
         edge_map: dict[str, GraphEdgeResponse] = {}
+        node_limit = max(0, self._settings.graph_node_limit)
+        edge_limit = max(0, self._settings.graph_edge_limit)
+        is_truncated = False
 
         for table in tables:
             name = str(table.get("name", ""))
             kind = str(table.get("type", ""))
-            rows = self._load_rows(gateway, name, kind)
+            if kind == "REL" and len(edge_map) >= edge_limit:
+                is_truncated = True
+                continue
+            if kind != "REL" and len(node_map) >= node_limit:
+                is_truncated = True
+                continue
+            rows = self._load_rows(gateway, name, kind, node_limit=node_limit, edge_limit=edge_limit, node_count=len(node_map), edge_count=len(edge_map))
             if kind == "REL":
-                self._collect_relationship_rows(rows, name, node_map, edge_map)
+                is_truncated = self._collect_relationship_rows(rows, name, node_map, edge_map, node_limit, edge_limit) or is_truncated
             else:
-                self._collect_node_rows(rows, name, node_map)
+                is_truncated = self._collect_node_rows(rows, name, node_map, node_limit) or is_truncated
 
         return SessionGraphResponse(
             session_id=session_id,
@@ -44,27 +55,51 @@ class GraphSnapshotService:
             generated_at=utc_now().isoformat(),
             node_count=len(node_map),
             edge_count=len(edge_map),
+            node_limit=node_limit,
+            edge_limit=edge_limit,
+            is_truncated=is_truncated,
             nodes=list(node_map.values()),
             edges=list(edge_map.values()),
         )
 
-    def _load_rows(self, gateway: KuzuGateway, table_name: str, kind: str) -> list[dict[str, Any]]:
+    def _load_rows(
+        self,
+        gateway: KuzuGateway,
+        table_name: str,
+        kind: str,
+        *,
+        node_limit: int,
+        edge_limit: int,
+        node_count: int,
+        edge_count: int,
+    ) -> list[dict[str, Any]]:
         if not table_name:
             return []
+        remaining = edge_limit - edge_count if kind == "REL" else node_limit - node_count
+        if remaining <= 0:
+            return []
         if kind == "REL":
-            return gateway.execute(f"MATCH (a)-[r:{_quote_identifier(table_name)}]->(b) RETURN a, r, b;")
-        return gateway.execute(f"MATCH (n:{_quote_identifier(table_name)}) RETURN n;")
+            return gateway.sample_rows(table_name, kind=kind, limit=remaining)
+        return gateway.sample_rows(table_name, kind=kind, limit=remaining)
 
     def _collect_node_rows(
         self,
         rows: list[dict[str, Any]],
         table_name: str,
         node_map: dict[str, GraphNodeResponse],
-    ) -> None:
+        node_limit: int,
+    ) -> bool:
+        truncated = False
         for row in rows:
+            if len(node_map) >= node_limit:
+                truncated = True
+                break
             node = row.get("n")
             response = self._node_from_value(node, table_name)
             node_map[response.id] = response
+        if len(rows) >= max(0, node_limit):
+            truncated = truncated or len(node_map) >= node_limit
+        return truncated
 
     def _collect_relationship_rows(
         self,
@@ -72,14 +107,27 @@ class GraphSnapshotService:
         table_name: str,
         node_map: dict[str, GraphNodeResponse],
         edge_map: dict[str, GraphEdgeResponse],
-    ) -> None:
+        node_limit: int,
+        edge_limit: int,
+    ) -> bool:
+        truncated = False
         for row in rows:
+            if len(edge_map) >= edge_limit:
+                truncated = True
+                break
             source = self._node_from_value(row.get("a"), "source")
             target = self._node_from_value(row.get("b"), "target")
+            required_nodes = int(source.id not in node_map) + int(target.id not in node_map)
+            if len(node_map) + required_nodes > node_limit:
+                truncated = True
+                continue
             node_map[source.id] = source
             node_map[target.id] = target
             edge = self._edge_from_value(row.get("r"), table_name, source.id, target.id)
             edge_map[edge.id] = edge
+        if len(rows) >= max(0, edge_limit):
+            truncated = truncated or len(edge_map) >= edge_limit
+        return truncated
 
     def _node_from_value(self, value: Any, fallback_label: str) -> GraphNodeResponse:
         attrs = _object_attrs(value)

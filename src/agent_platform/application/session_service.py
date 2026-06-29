@@ -20,6 +20,7 @@ from agent_platform.domain.models import (
     MissionRequest,
     ModelDescriptor,
     ResearchSession,
+    ResearchSessionSummary,
     RuntimeContext,
     SessionAgentContext,
     SessionSummary,
@@ -99,8 +100,22 @@ class SessionService:
     def list_sessions(self) -> list[ResearchSession]:
         return sorted(self._store.list_sessions(), key=lambda item: item.updated_at, reverse=True)
 
+    def list_session_summaries(self) -> list[ResearchSessionSummary]:
+        return self._store.list_summaries()
+
     def get(self, session_id: str) -> ResearchSession | None:
         return self._store.load(session_id)
+
+    def get_turn_page(
+        self,
+        session_id: str,
+        *,
+        limit: int,
+        before_message_id: str | None = None,
+    ) -> tuple[ResearchSession, list[SessionTurn], bool]:
+        session = self._require(session_id)
+        turns, has_more = self._slice_turns(session.turns, limit=limit, before_message_id=before_message_id)
+        return session, turns, has_more
 
     def update(self, session_id: str, request: SessionUpdateRequest) -> ResearchSession:
         session = self._require(session_id)
@@ -480,6 +495,31 @@ class SessionService:
         if session.web_tool_call_limit is not None:
             return session.web_tool_call_limit
         return self._settings.browser.web_tool_call_budget
+
+    def _slice_turns(
+        self,
+        turns: list[SessionTurn],
+        *,
+        limit: int,
+        before_message_id: str | None = None,
+    ) -> tuple[list[SessionTurn], bool]:
+        if limit <= 0:
+            limit = len(turns) or 0
+        end_index = len(turns)
+        if before_message_id is not None:
+            index = self._find_turn_index(turns, before_message_id)
+            if index is not None:
+                end_index = index
+        start_index = max(0, end_index - limit) if limit > 0 else 0
+        page = turns[start_index:end_index]
+        has_more = start_index > 0
+        return page, has_more
+
+    def _find_turn_index(self, turns: list[SessionTurn], message_id: str) -> int | None:
+        for index, turn in enumerate(turns):
+            if turn.message_id == message_id:
+                return index
+        return None
 
     def _require(self, session_id: str) -> ResearchSession:
         session = self._store.load(session_id)

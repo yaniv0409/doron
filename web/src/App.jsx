@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { JsonView, collapseAllNested, darkStyles } from "react-json-view-lite";
 import { ReactMarkdown } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -8,6 +8,7 @@ import "react-json-view-lite/dist/index.css";
 import GraphPanel from "./GraphPanel";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+const INITIAL_TURN_LIMIT = 12;
 
 const EMPTY_GRAPH = {
   nodes: [],
@@ -37,398 +38,667 @@ export default function App() {
   const [sessions, setSessions] = useState([]);
   const [activeSession, setActiveSession] = useState(null);
   const [graph, setGraph] = useState(EMPTY_GRAPH);
-  const [graphSearchQuery, setGraphSearchQuery] = useState("");
   const [inspectedItem, setInspectedItem] = useState(null);
-  const [sessionName, setSessionName] = useState("");
-  const [useDedicatedDb, setUseDedicatedDb] = useState(false);
-  const [message, setMessage] = useState("");
-  const [sessionWebLimit, setSessionWebLimit] = useState("");
-  const [messageWebLimit, setMessageWebLimit] = useState("");
   const [activity, setActivity] = useState([]);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState("");
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
-    if (typeof window === "undefined") {
-      return true;
-    }
-    const savedValue = window.localStorage.getItem("doron.sidebarCollapsed");
-    if (savedValue === null) {
-      return true;
-    }
-    return savedValue === "1";
-  });
-  const activityLogRef = useRef(null);
-  const followActivityRef = useRef(true);
+  const loadTokenRef = useRef(0);
+  const currentSessionIdRef = useRef(null);
 
   useEffect(() => {
-    void refreshSessions();
+    void refreshSessions().catch(() => {});
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem("doron.sidebarCollapsed", isSidebarCollapsed ? "1" : "0");
-  }, [isSidebarCollapsed]);
+    currentSessionIdRef.current = activeSession?.session_id ?? null;
+  }, [activeSession?.session_id]);
 
   const turns = activeSession?.turns || [];
-  const pendingUserMessage = isSending ? message.trim() : "";
   const showThinkingBlock = isSending || activity.length > 0;
-  const filteredGraph = useMemo(() => filterGraph(graph, graphSearchQuery), [graph, graphSearchQuery]);
   const graphSummary = useMemo(() => {
-    if (!graphSearchQuery.trim()) {
+    if (!activeSession) {
+      return "0 nodes, 0 edges";
+    }
+    if (!graph.node_count || !graph.edge_count) {
       return `${graph.node_count || 0} nodes, ${graph.edge_count || 0} edges`;
     }
-    return `${filteredGraph.node_count}/${graph.node_count || 0} nodes, ${filteredGraph.edge_count}/${graph.edge_count || 0} edges`;
-  }, [filteredGraph, graph, graphSearchQuery]);
+    if (graph.is_truncated) {
+      return `${graph.node_count} nodes, ${graph.edge_count} edges, truncated`;
+    }
+    return `${graph.node_count} nodes, ${graph.edge_count} edges`;
+  }, [activeSession, graph]);
 
-  async function refreshSessions() {
+  const refreshSessions = useCallback(async () => {
     const response = await fetch(`${API_BASE}/sessions`);
     const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(readError(payload));
+    }
     setSessions(payload);
-  }
+  }, []);
 
-  async function loadSession(sessionId) {
-    const [detailResponse, graphResponse] = await Promise.all([
-      fetch(`${API_BASE}/sessions/${sessionId}`),
-      fetch(`${API_BASE}/sessions/${sessionId}/graph`),
-    ]);
-    const detail = await detailResponse.json();
-    const graphPayload = await graphResponse.json();
-    setActiveSession(detail);
-    setGraph(graphPayload);
-    setSessionWebLimit(detail.web_tool_call_limit ?? "");
-    setMessageWebLimit(detail.web_tool_call_limit ?? "");
-    setInspectedItem(null);
-    setActivity([]);
-    setError("");
-  }
-
-  useEffect(() => {
-    if (showThinkingBlock) {
-      followActivityRef.current = true;
-    }
-  }, [showThinkingBlock]);
-
-  useEffect(() => {
-    if (!showThinkingBlock || !followActivityRef.current) {
-      return;
-    }
-    const container = activityLogRef.current;
-    if (!container) {
-      return;
-    }
-    container.scrollTop = container.scrollHeight;
-  }, [activity, showThinkingBlock]);
-
-  async function refreshGraph(sessionId) {
+  const refreshGraph = useCallback(async (sessionId, token = loadTokenRef.current) => {
     const response = await fetch(`${API_BASE}/sessions/${sessionId}/graph`);
     if (!response.ok) {
       return;
     }
     const payload = await response.json();
+    if (token !== loadTokenRef.current) {
+      return;
+    }
+    if (currentSessionIdRef.current !== sessionId) {
+      return;
+    }
     setGraph(payload);
-  }
+  }, []);
 
-  async function openSession(event) {
-    event.preventDefault();
-    setError("");
-    const response = await fetch(`${API_BASE}/sessions/open`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: sessionName,
-        use_dedicated_db: useDedicatedDb,
-        web_tool_call_limit: toNullableNumber(sessionWebLimit),
-      }),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      setError(readError(payload));
-      return;
-    }
-    setSessionName("");
-    await refreshSessions();
-    await loadSession(payload.session_id);
-  }
+  const loadSession = useCallback(
+    async (sessionId, { turnLimit = INITIAL_TURN_LIMIT } = {}) => {
+      const token = ++loadTokenRef.current;
+      setError("");
+      setInspectedItem(null);
+      setActivity([]);
+      setGraph(EMPTY_GRAPH);
 
-  async function saveSessionSettings() {
-    if (!activeSession) {
-      return;
-    }
-    const response = await fetch(`${API_BASE}/sessions/${activeSession.session_id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        web_tool_call_limit: toNullableNumber(sessionWebLimit),
-      }),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      setError(readError(payload));
-      return;
-    }
-    setActiveSession(payload);
-    await refreshSessions();
-  }
-
-  async function sendMessage(event) {
-    event.preventDefault();
-    if (!activeSession || !message.trim() || isSending) {
-      return;
-    }
-    setIsSending(true);
-    setError("");
-    setActivity([]);
-
-    const response = await fetch(`${API_BASE}/sessions/${activeSession.session_id}/chat/stream`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message,
-        web_tool_call_limit: toNullableNumber(messageWebLimit),
-      }),
-    });
-    if (!response.ok || !response.body) {
+      const response = await fetch(`${API_BASE}/sessions/${sessionId}?turn_limit=${turnLimit}`);
       const payload = await response.json();
-      setError(readError(payload));
+      if (!response.ok) {
+        if (token === loadTokenRef.current) {
+          setError(readError(payload));
+        }
+        return false;
+      }
+      if (token !== loadTokenRef.current) {
+        return false;
+      }
+
+      currentSessionIdRef.current = sessionId;
+      setActiveSession(payload);
+      void refreshGraph(sessionId, token);
+      return true;
+    },
+    [refreshGraph],
+  );
+
+  const openSession = useCallback(
+    async ({ name, useDedicatedDb, webToolCallLimit }) => {
+      const response = await fetch(`${API_BASE}/sessions/open`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          use_dedicated_db: useDedicatedDb,
+          web_tool_call_limit: toNullableNumber(webToolCallLimit),
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setError(readError(payload));
+        return false;
+      }
+      await Promise.all([refreshSessions().catch(() => {}), loadSession(payload.session_id)]);
+      return true;
+    },
+    [loadSession, refreshSessions],
+  );
+
+  const saveSessionSettings = useCallback(
+    async (sessionId, webToolCallLimit) => {
+      const response = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          web_tool_call_limit: toNullableNumber(webToolCallLimit),
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setError(readError(payload));
+        return false;
+      }
+      setActiveSession(payload);
+      await refreshSessions().catch(() => {});
+      return true;
+    },
+    [refreshSessions],
+  );
+
+  const loadOlderTurns = useCallback(
+    async (sessionId, beforeMessageId) => {
+      if (!beforeMessageId) {
+        return false;
+      }
+      const response = await fetch(
+        `${API_BASE}/sessions/${sessionId}/turns?limit=${INITIAL_TURN_LIMIT}&before=${encodeURIComponent(beforeMessageId)}`,
+      );
+      const payload = await response.json();
+      if (!response.ok) {
+        setError(readError(payload));
+        return false;
+      }
+      setActiveSession((current) => {
+        if (!current || current.session_id !== sessionId) {
+          return current;
+        }
+        return {
+          ...current,
+          turns: [...payload.turns, ...current.turns],
+          turn_count: payload.turn_count,
+          has_more_turns: payload.has_more_turns,
+          oldest_turn_message_id: payload.oldest_turn_message_id,
+          newest_turn_message_id: current.newest_turn_message_id || payload.newest_turn_message_id,
+        };
+      });
+      return true;
+    },
+    [],
+  );
+
+  const sendMessage = useCallback(
+    async ({ sessionId, message, webToolCallLimit }) => {
+      const trimmedMessage = message.trim();
+      if (!trimmedMessage) {
+        return false;
+      }
+      const optimisticTurn = createTurn({
+        role: "user",
+        content: trimmedMessage,
+        webToolCallLimitUsed: toNullableNumber(webToolCallLimit),
+      });
+
+      setIsSending(true);
+      setError("");
+      setActivity([]);
+      setActiveSession((current) => appendTurn(current, sessionId, optimisticTurn));
+
+      const response = await fetch(`${API_BASE}/sessions/${sessionId}/chat/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: trimmedMessage,
+          web_tool_call_limit: toNullableNumber(webToolCallLimit),
+        }),
+      });
+      if (!response.ok || !response.body) {
+        const payload = await response.json();
+        setError(readError(payload));
+        setIsSending(false);
+        return false;
+      }
+
+      await consumeSse(response.body, (eventName, payload) => {
+        handleStreamEvent(eventName, payload, {
+          sessionId,
+          submittedMessage: trimmedMessage,
+        });
+      });
+
       setIsSending(false);
-      return;
-    }
+      void refreshSessions().catch(() => {});
+      return true;
+    },
+    [refreshSessions],
+  );
 
-    await consumeSse(response.body, handleStreamEvent);
-    setMessage("");
-    await refreshSessions();
-    await loadSession(activeSession.session_id);
-    setIsSending(false);
-  }
+  const handleStreamEvent = useCallback(
+    (eventName, payload, context) => {
+      setActivity((items) => [...items, buildActivityEntry(eventName, payload)]);
+      if (eventName === "session.message.failed") {
+        setError(readError(payload));
+      }
+      if (eventName === "session.message.completed" || eventName === "session.message.failed") {
+        setActiveSession((current) => {
+          if (!current || current.session_id !== context.sessionId) {
+            return current;
+          }
+          const assistantTurn = createTurn({
+            role: "assistant",
+            content:
+              payload.assistant_message ||
+              payload.error?.message ||
+              payload.message ||
+              "Request failed.",
+            traceId: payload.trace_id || null,
+            status: payload.status || (eventName === "session.message.failed" ? "failed" : "completed"),
+            resultFormat: payload.result_format || "text",
+            webToolCallLimitUsed: payload.web_tool_call_limit_used ?? current.web_tool_call_limit,
+            completion: payload.completion || null,
+          });
+          return appendTurn(current, current.session_id, assistantTurn);
+        });
+      }
+      if (eventName === "session.graph.updated" && payload.session_id) {
+        void refreshGraph(payload.session_id);
+      }
+    },
+    [refreshGraph],
+  );
 
-  function handleStreamEvent(eventName, payload) {
-    setActivity((items) => [...items, buildActivityEntry(eventName, payload)]);
-    if (eventName === "session.message.failed") {
-      setError(readError(payload));
-    }
-    if (eventName === "session.graph.updated" && payload.session_id) {
-      void refreshGraph(payload.session_id);
+  const handleSelectSession = useCallback(
+    (sessionId) => {
+      void loadSession(sessionId);
+    },
+    [loadSession],
+  );
+
+  return (
+    <div className="app-shell">
+      <SessionSidebar
+        activeSessionId={activeSession?.session_id ?? null}
+        onOpenSession={openSession}
+        onSelectSession={handleSelectSession}
+        sessions={sessions}
+      />
+
+      <main className="workspace">
+        <ChatColumn
+          activeSession={activeSession}
+          activity={activity}
+          error={error}
+          isSending={isSending}
+          onLoadOlderTurns={loadOlderTurns}
+          onSaveSessionSettings={saveSessionSettings}
+          onSendMessage={sendMessage}
+          showThinkingBlock={showThinkingBlock}
+          turns={turns}
+        />
+
+        <GraphColumn
+          graph={graph}
+          graphSummary={graphSummary}
+          inspectedItem={inspectedItem}
+          onInspect={setInspectedItem}
+        />
+      </main>
+    </div>
+  );
+}
+
+function SessionSidebar({ activeSessionId, onOpenSession, onSelectSession, sessions }) {
+  const [sessionName, setSessionName] = useState("");
+  const [useDedicatedDb, setUseDedicatedDb] = useState(false);
+  const [webToolCallLimit, setWebToolCallLimit] = useState("");
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    const ok = await onOpenSession({
+      name: sessionName,
+      useDedicatedDb,
+      webToolCallLimit,
+    });
+    if (ok) {
+      setSessionName("");
+      setUseDedicatedDb(false);
+      setWebToolCallLimit("");
     }
   }
 
   return (
-    <div className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
-      <aside className={`sidebar ${isSidebarCollapsed ? "collapsed" : ""}`}>
-        <div className="sidebar-top">
-          <div className="brand">
-            <h1>Doron</h1>
-            <p>Research sessions with live graph memory.</p>
-          </div>
+    <aside className="sidebar">
+      <div className="sidebar-top">
+        <div className="brand">
+          <h1>Doron</h1>
+          <p>Research sessions with live graph memory.</p>
+        </div>
+      </div>
+
+      <div className="sidebar-body">
+        <form className="card form-stack" onSubmit={handleSubmit}>
+          <label>
+            Session name
+            <input value={sessionName} onChange={(event) => setSessionName(event.target.value)} required />
+          </label>
+          <label className="checkbox">
+            <input checked={useDedicatedDb} type="checkbox" onChange={(event) => setUseDedicatedDb(event.target.checked)} />
+            Use dedicated project DB
+          </label>
+          <label>
+            Session web limit
+            <input
+              type="number"
+              min="0"
+              value={webToolCallLimit}
+              onChange={(event) => setWebToolCallLimit(event.target.value)}
+              placeholder="shared default"
+            />
+          </label>
+          <button type="submit">Open or resume</button>
+        </form>
+
+        <div className="card session-list">
+          <h2>Sessions</h2>
+          {sessions.map((session) => (
+            <button
+              className={`session-item ${activeSessionId === session.session_id ? "active" : ""}`}
+              key={session.session_id}
+              onClick={() => onSelectSession(session.session_id)}
+              type="button"
+            >
+              <span>{session.name}</span>
+              <small>{session.uses_dedicated_db ? "Dedicated DB" : "Shared DB"}</small>
+            </button>
+          ))}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function ChatColumn({
+  activeSession,
+  activity,
+  error,
+  isSending,
+  onLoadOlderTurns,
+  onSaveSessionSettings,
+  onSendMessage,
+  showThinkingBlock,
+  turns,
+}) {
+  return (
+    <section className="chat-column">
+      <div className="chat-header card">
+        <div>
+          <h2>{activeSession?.name || "No session selected"}</h2>
+          <p>{activeSession?.db_path || "Open a session to begin."}</p>
+        </div>
+        {activeSession ? (
+          <SessionLimitEditor
+            activeSession={activeSession}
+            onSaveSessionSettings={onSaveSessionSettings}
+          />
+        ) : null}
+      </div>
+
+      {activeSession?.has_more_turns ? (
+        <div className="card load-more-row">
           <button
-            className="sidebar-toggle"
-            aria-expanded={!isSidebarCollapsed}
-            aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            onClick={() => setIsSidebarCollapsed((value) => !value)}
+            disabled={isSending}
+            onClick={() => onLoadOlderTurns(activeSession.session_id, activeSession.oldest_turn_message_id)}
             type="button"
           >
-            <span aria-hidden="true" className="sidebar-toggle-bars">
-              <span />
-              <span />
-              <span />
-            </span>
+            Load older turns
           </button>
         </div>
+      ) : null}
 
-        <div className="sidebar-body">
-          <form className="card form-stack" onSubmit={openSession}>
-            <label>
-              Session name
-              <input value={sessionName} onChange={(event) => setSessionName(event.target.value)} required />
-            </label>
-            <label className="checkbox">
-              <input
-                checked={useDedicatedDb}
-                type="checkbox"
-                onChange={(event) => setUseDedicatedDb(event.target.checked)}
-              />
-              Use dedicated project DB
-            </label>
-            <label>
-              Session web limit
-              <input
-                type="number"
-                min="0"
-                value={sessionWebLimit}
-                onChange={(event) => setSessionWebLimit(event.target.value)}
-                placeholder="shared default"
-              />
-            </label>
-            <button type="submit">Open or resume</button>
-          </form>
-
-          <div className="card session-list">
-            <h2>Sessions</h2>
-            {sessions.map((session) => (
-              <button
-                className={`session-item ${activeSession?.session_id === session.session_id ? "active" : ""}`}
-                key={session.session_id}
-                onClick={() => loadSession(session.session_id)}
-                type="button"
-              >
-                <span>{session.name}</span>
-                <small>{session.uses_dedicated_db ? "Dedicated DB" : "Shared DB"}</small>
-              </button>
-            ))}
-          </div>
-        </div>
-      </aside>
-
-      <main className="workspace">
-        <section className="chat-column">
-          <div className="chat-header card">
-            <div>
-              <h2>{activeSession?.name || "No session selected"}</h2>
-              <p>{activeSession?.db_path || "Open a session to begin."}</p>
-            </div>
-            {activeSession ? (
-              <div className="settings-inline">
-                <label>
-                  Session web limit
-                  <input
-                    type="number"
-                    min="0"
-                    value={sessionWebLimit}
-                    onChange={(event) => setSessionWebLimit(event.target.value)}
-                  />
-                </label>
-                <button onClick={saveSessionSettings} type="button">
-                  Save
-                </button>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="chat-log">
-            {turns.map((turn) => (
-              <article className={`turn ${turn.role}`} key={turn.message_id}>
-                <header>
-                  <strong>{turn.role === "user" ? "You" : "Doron"}</strong>
-                  <span>{turn.web_tool_call_limit_used ?? "-"}</span>
-                </header>
-                <TurnContent turn={turn} />
-              </article>
-            ))}
-            {pendingUserMessage ? (
-              <article className="turn user pending-turn" key="pending-user-message">
-                <header>
-                  <strong>You</strong>
-                  <span>{toDisplayLimit(messageWebLimit)}</span>
-                </header>
-                <pre>{pendingUserMessage}</pre>
-              </article>
-            ) : null}
-            {showThinkingBlock ? (
-              <article className="turn assistant thinking-turn" key="live-activity">
-                <header>
-                  <strong>Doron</strong>
-                  <span>{isSending ? "thinking" : "activity"}</span>
-                </header>
-                <div className="thinking-shell">
-                  <div className="thinking-label">Live activity</div>
-                  <div
-                    className="activity-log"
-                    onScroll={() => {
-                      const container = activityLogRef.current;
-                      if (!container) {
-                        return;
-                      }
-                      const distanceFromBottom =
-                        container.scrollHeight - container.scrollTop - container.clientHeight;
-                      followActivityRef.current = distanceFromBottom <= 24;
-                    }}
-                    ref={activityLogRef}
-                  >
-                    {activity.map((item) =>
-                      item.kind === "tool" ? (
-                        <details className={`activity-item tool ${item.status}`} key={item.id}>
-                          <summary>
-                            <span className="activity-summary">{item.summary}</span>
-                            <span className="activity-status">{item.statusLabel}</span>
-                          </summary>
-                          <div className="activity-panel">
-                            <div className="activity-panel-heading">Parameters</div>
-                            <pre>{formatJson(item.parameters)}</pre>
-                            {item.reason ? (
-                              <>
-                                <div className="activity-panel-heading">Reason</div>
-                                <pre>{item.reason}</pre>
-                              </>
-                            ) : null}
-                          </div>
-                        </details>
-                      ) : (
-                        <div className="activity-line" key={item.id}>
-                          {item.text}
-                        </div>
-                      ),
-                    )}
-                    <div aria-hidden="true" />
-                  </div>
-                </div>
-              </article>
-            ) : null}
-          </div>
-
-          <form className="composer card" onSubmit={sendMessage}>
-            <textarea
-              value={message}
-              onChange={(event) => setMessage(event.target.value)}
-              placeholder="Ask Doron to research, compare, inspect, or write into the graph..."
-              rows={5}
-            />
-            <div className="composer-controls">
-              <label>
-                Message web limit
-                <input
-                  type="number"
-                  min="0"
-                  value={messageWebLimit}
-                  onChange={(event) => setMessageWebLimit(event.target.value)}
-                  placeholder="use session default"
-                />
-              </label>
-              <button disabled={!activeSession || isSending} type="submit">
-                {isSending ? "Running..." : "Send"}
-              </button>
-            </div>
-          </form>
-          {error ? <div className="error-banner">{error}</div> : null}
-        </section>
-
-        <section className="graph-column">
-          <div className="card graph-header">
-            <div className="graph-header-copy">
-              <h2>Living graph</h2>
-              <p>{graphSummary}</p>
-              <div className="graph-legend">
-                <span className="graph-legend-swatch" aria-hidden="true" />
-                <span>Hue = node or edge type, node brightness = visible connectivity</span>
+      <div className="chat-log">
+        {turns.map((turn) => (
+          <article className={`turn ${turn.role}`} key={turn.message_id}>
+            <header>
+              <strong>{turn.role === "user" ? "You" : "Doron"}</strong>
+              <span>{turn.web_tool_call_limit_used ?? "-"}</span>
+            </header>
+            <TurnContent turn={turn} />
+          </article>
+        ))}
+        {showThinkingBlock ? (
+          <article className="turn assistant thinking-turn" key="live-activity">
+            <header>
+              <strong>Doron</strong>
+              <span>{isSending ? "thinking" : "activity"}</span>
+            </header>
+            <div className="thinking-shell">
+              <div className="thinking-label">Live activity</div>
+              <div className="activity-log">
+                {activity.map((item) =>
+                  item.kind === "tool" ? (
+                    <details className={`activity-item tool ${item.status}`} key={item.id}>
+                      <summary>
+                        <span className="activity-summary">{item.summary}</span>
+                        <span className="activity-status">{item.statusLabel}</span>
+                      </summary>
+                      <div className="activity-panel">
+                        <div className="activity-panel-heading">Parameters</div>
+                        <pre>{formatJson(item.parameters)}</pre>
+                        {item.reason ? (
+                          <>
+                            <div className="activity-panel-heading">Reason</div>
+                            <pre>{item.reason}</pre>
+                          </>
+                        ) : null}
+                      </div>
+                    </details>
+                  ) : (
+                    <div className="activity-line" key={item.id}>
+                      {item.text}
+                    </div>
+                  ),
+                )}
+                <div aria-hidden="true" />
               </div>
             </div>
-            <label className="graph-search">
-              <span>Search graph</span>
-              <input
-                type="search"
-                value={graphSearchQuery}
-                onChange={(event) => setGraphSearchQuery(event.target.value)}
-                placeholder="Search nodes, edges, ids, properties..."
-              />
-            </label>
-          </div>
-          <div className="card graph-wrap">
-            <GraphPanel graph={filteredGraph} onInspect={setInspectedItem} />
-          </div>
-          <div className="card inspector">
-            <MetadataInspector item={inspectedItem} />
-          </div>
-        </section>
-      </main>
+          </article>
+        ) : null}
+      </div>
+
+      <Composer
+        activeSession={activeSession}
+        isSending={isSending}
+        onSendMessage={onSendMessage}
+      />
+      {error ? <div className="error-banner">{error}</div> : null}
+    </section>
+  );
+}
+
+function SessionLimitEditor({ activeSession, onSaveSessionSettings }) {
+  const [sessionWebLimit, setSessionWebLimit] = useState("");
+
+  useEffect(() => {
+    setSessionWebLimit(activeSession?.web_tool_call_limit ?? "");
+  }, [activeSession?.session_id, activeSession?.web_tool_call_limit]);
+
+  async function handleSave() {
+    await onSaveSessionSettings(activeSession.session_id, sessionWebLimit);
+  }
+
+  return (
+    <div className="settings-inline">
+      <label>
+        Session web limit
+        <input
+          type="number"
+          min="0"
+          value={sessionWebLimit}
+          onChange={(event) => setSessionWebLimit(event.target.value)}
+        />
+      </label>
+      <button onClick={handleSave} type="button">
+        Save
+      </button>
     </div>
   );
+}
+
+function Composer({ activeSession, isSending, onSendMessage }) {
+  const [message, setMessage] = useState("");
+  const [messageWebLimit, setMessageWebLimit] = useState("");
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (!activeSession || isSending) {
+      return;
+    }
+    const ok = await onSendMessage({
+      sessionId: activeSession.session_id,
+      message,
+      webToolCallLimit: messageWebLimit,
+    });
+    if (ok) {
+      setMessage("");
+      setMessageWebLimit("");
+    }
+  }
+
+  return (
+    <form className="composer card" onSubmit={handleSubmit}>
+      <textarea
+        disabled={!activeSession || isSending}
+        value={message}
+        onChange={(event) => setMessage(event.target.value)}
+        placeholder="Ask Doron to research, compare, inspect, or write into the graph..."
+        rows={5}
+      />
+      <div className="composer-controls">
+        <label>
+          Message web limit
+          <input
+            disabled={!activeSession || isSending}
+            type="number"
+            min="0"
+            value={messageWebLimit}
+            onChange={(event) => setMessageWebLimit(event.target.value)}
+            placeholder="use session default"
+          />
+        </label>
+        <button disabled={!activeSession || isSending} type="submit">
+          {isSending ? "Running..." : "Send"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function GraphColumn({ graph, graphSummary, inspectedItem, onInspect }) {
+  const [graphSearchQuery, setGraphSearchQuery] = useState("");
+  const deferredGraphSearchQuery = useDeferredValue(graphSearchQuery);
+  const filteredGraph = useMemo(
+    () => filterGraph(graph, deferredGraphSearchQuery),
+    [deferredGraphSearchQuery, graph],
+  );
+
+  return (
+    <section className="graph-column">
+      <div className="card graph-header">
+        <div className="graph-header-copy">
+          <h2>Living graph</h2>
+          <p>{graphSummary}</p>
+          <div className="graph-legend">
+            <span className="graph-legend-swatch" aria-hidden="true" />
+            <span>Hue = node or edge type, node brightness = visible connectivity</span>
+          </div>
+        </div>
+        <label className="graph-search">
+          <span>Search graph</span>
+          <input
+            type="search"
+            value={graphSearchQuery}
+            onChange={(event) => setGraphSearchQuery(event.target.value)}
+            placeholder="Search nodes, edges, ids, properties..."
+          />
+        </label>
+      </div>
+      <div className="card graph-wrap">
+        <GraphPanel graph={filteredGraph} onInspect={onInspect} />
+      </div>
+      <div className="card inspector">
+        <MetadataInspector item={inspectedItem} />
+      </div>
+    </section>
+  );
+}
+
+function MetadataInspector({ item }) {
+  const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
+  const normalizedQuery = normalizeSearchText(deferredQuery);
+  const filteredItem = useMemo(() => filterMetadataValue(item, normalizedQuery), [item, normalizedQuery]);
+  const showEmptyState = !item;
+  const showNoMatchState = Boolean(item) && normalizedQuery && filteredItem === undefined;
+
+  useEffect(() => {
+    setQuery("");
+  }, [item]);
+
+  return (
+    <>
+      <div className="inspector-header">
+        <div>
+          <h3>Metadata inspector</h3>
+          <p>Inspect selected graph items as searchable JSON.</p>
+        </div>
+        <label className="inspector-search">
+          <span>Search metadata</span>
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search keys and values..."
+            disabled={!item}
+          />
+        </label>
+      </div>
+      <div className="inspector-body">
+        {showEmptyState ? (
+          <div className="inspector-state">Select a node or edge.</div>
+        ) : showNoMatchState ? (
+          <div className="inspector-state">No matching metadata fields.</div>
+        ) : (
+          <JsonView
+            aria-label="Metadata JSON viewer"
+            clickToExpandNode
+            compactTopLevel={false}
+            data={filteredItem}
+            shouldExpandNode={resolveInspectorExpansion}
+            style={INSPECTOR_JSON_STYLES}
+          />
+        )}
+      </div>
+    </>
+  );
+}
+
+const TurnContent = memo(function TurnContent({ turn }) {
+  if (turn.role === "assistant" && turn.result_format === "text") {
+    return (
+      <div className="markdown-body">
+        <ReactMarkdown
+          rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}
+          remarkPlugins={[remarkGfm]}
+          components={MARKDOWN_COMPONENTS}
+        >
+          {turn.content}
+        </ReactMarkdown>
+      </div>
+    );
+  }
+  return <pre>{turn.content}</pre>;
+});
+
+function appendTurn(session, sessionId, turn) {
+  if (!session || session.session_id !== sessionId) {
+    return session;
+  }
+  const turns = [...session.turns, turn];
+  return {
+    ...session,
+    turns,
+    turn_count: Math.max(session.turn_count || session.turns.length, turns.length),
+    newest_turn_message_id: turn.message_id,
+  };
+}
+
+function createTurn({
+  content,
+  role,
+  traceId = null,
+  status = "completed",
+  resultFormat = "text",
+  webToolCallLimitUsed = null,
+  completion = null,
+}) {
+  return {
+    message_id: cryptoRandomId(),
+    role,
+    content,
+    created_at: new Date().toISOString(),
+    trace_id: traceId,
+    status,
+    result_format: resultFormat,
+    web_tool_call_limit_used: webToolCallLimitUsed,
+    completion,
+  };
 }
 
 async function consumeSse(stream, onEvent) {
@@ -530,11 +800,20 @@ function toNullableNumber(value) {
   return Number(value);
 }
 
-function toDisplayLimit(value) {
-  if (value === "" || value === null || value === undefined) {
-    return "-";
+function extendJsonViewStyles(baseStyles, additions) {
+  return Object.fromEntries(
+    Object.entries(baseStyles).map(([key, value]) => [key, joinJsonViewClasses(value, additions[key])]),
+  );
+}
+
+function joinJsonViewClasses(baseClassName, extraClassName) {
+  if (!extraClassName) {
+    return baseClassName;
   }
-  return String(value);
+  if (!baseClassName) {
+    return extraClassName;
+  }
+  return `${baseClassName} ${extraClassName}`;
 }
 
 function filterGraph(graph, query) {
@@ -615,78 +894,6 @@ function normalizeSearchText(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-function extendJsonViewStyles(baseStyles, additions) {
-  return Object.fromEntries(
-    Object.entries(baseStyles).map(([key, value]) => [key, joinJsonViewClasses(value, additions[key])]),
-  );
-}
-
-function joinJsonViewClasses(baseClassName, extraClassName) {
-  if (!extraClassName) {
-    return baseClassName;
-  }
-  if (!baseClassName) {
-    return extraClassName;
-  }
-  return `${baseClassName} ${extraClassName}`;
-}
-
-function MetadataInspector({ item }) {
-  const [query, setQuery] = useState("");
-  const normalizedQuery = normalizeSearchText(query);
-  const filteredItem = useMemo(() => filterMetadataValue(item, normalizedQuery), [item, normalizedQuery]);
-  const showEmptyState = !item;
-  const showNoMatchState = Boolean(item) && normalizedQuery && filteredItem === undefined;
-
-  useEffect(() => {
-    setQuery("");
-  }, [item]);
-
-  return (
-    <>
-      <div className="inspector-header">
-        <div>
-          <h3>Metadata inspector</h3>
-          <p>Inspect selected graph items as searchable JSON.</p>
-        </div>
-        <label className="inspector-search">
-          <span>Search metadata</span>
-          <input
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search keys and values..."
-            disabled={!item}
-          />
-        </label>
-      </div>
-      <div className="inspector-body">
-        {showEmptyState ? (
-          <div className="inspector-state">Select a node or edge.</div>
-        ) : showNoMatchState ? (
-          <div className="inspector-state">No matching metadata fields.</div>
-        ) : (
-          <JsonView
-            aria-label="Metadata JSON viewer"
-            clickToExpandNode
-            compactTopLevel={false}
-            data={filteredItem}
-            shouldExpandNode={resolveInspectorExpansion}
-            style={INSPECTOR_JSON_STYLES}
-          />
-        )}
-      </div>
-    </>
-  );
-}
-
-function resolveInspectorExpansion(level, value, field) {
-  if (field === "properties") {
-    return true;
-  }
-  return collapseAllNested(level, value, field);
-}
-
 function filterMetadataValue(value, normalizedQuery) {
   if (!normalizedQuery) {
     return value;
@@ -738,21 +945,11 @@ function matchesMetadataComposite(key, value, normalizedQuery) {
   return normalizeSearchText(key).includes(normalizedQuery) || flattenSearchValue(value).includes(normalizedQuery);
 }
 
-function TurnContent({ turn }) {
-  if (turn.role === "assistant" && turn.result_format === "text") {
-    return (
-      <div className="markdown-body">
-        <ReactMarkdown
-          rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}
-          remarkPlugins={[remarkGfm]}
-          components={MARKDOWN_COMPONENTS}
-        >
-          {turn.content}
-        </ReactMarkdown>
-      </div>
-    );
+function resolveInspectorExpansion(level, value, field) {
+  if (field === "properties") {
+    return true;
   }
-  return <pre>{turn.content}</pre>;
+  return collapseAllNested(level, value, field);
 }
 
 function resolveToolName(payload) {

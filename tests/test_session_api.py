@@ -148,6 +148,33 @@ def test_open_resume_and_update_session(tmp_path: Path) -> None:
     assert updated.web_tool_call_limit == 9
 
 
+def test_list_sessions_uses_summary_records(tmp_path: Path) -> None:
+    async def scenario() -> list[dict[str, object]]:
+        app = create_app()
+        settings = AppSettings()
+        settings.sessions = SessionSettings(
+            directory=tmp_path / "sessions-list",
+            db_directory=tmp_path / "dbs-list",
+            shared_db_path=tmp_path / "dbs-list" / "shared.kuzu",
+        )
+        mission_service = FakeMissionService()
+        store = SessionStore(settings.sessions)
+        service = SessionService(settings, mission_service, store)
+        session = service.open(SessionOpenRequest(name="List Session", web_tool_call_limit=2))
+        app.state.session_service = service
+        app.state.graph_snapshot_service = FakeGraphSnapshotService()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/sessions")
+
+        assert response.status_code == 200
+        return response.json()
+
+    payload = asyncio.run(scenario())
+    assert payload[0]["session_id"] != ""
+    assert payload[0]["last_trace_id"] is None
+
+
 def test_session_chat_persists_and_uses_web_limit(tmp_path: Path) -> None:
     settings = AppSettings()
     settings.sessions = SessionSettings(
@@ -159,7 +186,7 @@ def test_session_chat_persists_and_uses_web_limit(tmp_path: Path) -> None:
     service = SessionService(settings, mission_service, SessionStore(settings.sessions))
     session = service.open(SessionOpenRequest(name="Session A", web_tool_call_limit=3))
 
-    updated, trace_id, assistant_message, error, web_limit, completion = asyncio.run(
+    updated, trace_id, assistant_message, error, web_limit, completion, result_format = asyncio.run(
         service.run_chat(session.session_id, SessionChatRequest(message="Research NVIDIA", web_tool_call_limit=7))
     )
 
@@ -169,6 +196,7 @@ def test_session_chat_persists_and_uses_web_limit(tmp_path: Path) -> None:
     assert web_limit == 7
     assert completion is not None
     assert completion.finish_reason == "stop"
+    assert result_format == ResultFormat.TEXT
     assert mission_service.requests[0].web_tool_call_limit == 7
     assert len(updated.turns) == 2
     assert updated.summary.last_trace_id == "trace-1"
@@ -276,3 +304,37 @@ def test_session_routes_stream_and_graph(tmp_path: Path) -> None:
     assert graph_payload["node_count"] == 1
     assert detail_payload["web_tool_call_limit"] == 5
     assert detail_payload["turns"][-1]["web_tool_call_limit_used"] == 6
+
+
+def test_session_routes_page_turns(tmp_path: Path) -> None:
+    async def scenario() -> dict[str, object]:
+        app = create_app()
+        settings = AppSettings()
+        settings.sessions = SessionSettings(
+            directory=tmp_path / "sessions-page",
+            db_directory=tmp_path / "dbs-page",
+            shared_db_path=tmp_path / "dbs-page" / "shared.kuzu",
+        )
+        mission_service = FakeMissionService()
+        store = SessionStore(settings.sessions)
+        app.state.session_service = SessionService(settings, mission_service, store)
+        app.state.graph_snapshot_service = FakeGraphSnapshotService()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            opened = await client.post("/sessions/open", json={"name": "Paged Session"})
+            session_id = opened.json()["session_id"]
+            await client.post(f"/sessions/{session_id}/chat", json={"message": "First message"})
+            await client.post(f"/sessions/{session_id}/chat", json={"message": "Second message"})
+            detail = await client.get(f"/sessions/{session_id}?turn_limit=1")
+            turns = await client.get(
+                f"/sessions/{session_id}/turns?limit=1&before={detail.json()['oldest_turn_message_id']}"
+            )
+
+        return {"detail": detail.json(), "turns": turns.json()}
+
+    payload = asyncio.run(scenario())
+    assert payload["detail"]["turn_count"] == 4
+    assert len(payload["detail"]["turns"]) == 1
+    assert payload["detail"]["has_more_turns"] is True
+    assert len(payload["turns"]["turns"]) == 1
+    assert payload["turns"]["has_more_turns"] is True

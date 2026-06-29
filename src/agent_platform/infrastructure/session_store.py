@@ -6,7 +6,7 @@ from pathlib import Path
 from pydantic import TypeAdapter
 
 from agent_platform.config.settings import SessionSettings
-from agent_platform.domain.models import ResearchSession
+from agent_platform.domain.models import ResearchSession, ResearchSessionSummary
 
 
 class SessionStore:
@@ -16,11 +16,16 @@ class SessionStore:
         self._settings.db_directory.mkdir(parents=True, exist_ok=True)
         self._settings.shared_db_path.parent.mkdir(parents=True, exist_ok=True)
         self._adapter = TypeAdapter(ResearchSession)
+        self._summary_adapter = TypeAdapter(ResearchSessionSummary)
 
     def save(self, session: ResearchSession) -> Path:
         path = self.path(session.session_id)
         payload = self._adapter.dump_python(session, mode="json")
         path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        self.summary_path(session.session_id).write_text(
+            json.dumps(self._summary_adapter.dump_python(_build_summary(session), mode="json"), indent=2),
+            encoding="utf-8",
+        )
         return path
 
     def load(self, session_id: str) -> ResearchSession | None:
@@ -33,17 +38,55 @@ class SessionStore:
     def list_sessions(self) -> list[ResearchSession]:
         sessions: list[ResearchSession] = []
         for path in sorted(self._settings.directory.glob("*.json")):
-            if path.name.endswith(".context.json"):
+            if path.name.endswith(".context.json") or path.name.endswith(".summary.json"):
                 continue
             payload = json.loads(path.read_text(encoding="utf-8"))
             sessions.append(self._adapter.validate_python(payload))
         return sessions
 
-    def find_by_normalized_name(self, normalized_name: str) -> ResearchSession | None:
+    def list_summaries(self) -> list[ResearchSessionSummary]:
+        summaries: dict[str, ResearchSessionSummary] = {}
+        for path in sorted(self._settings.directory.glob("*.summary.json")):
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            summary = self._summary_adapter.validate_python(payload)
+            summaries[summary.session_id] = summary
+
         for session in self.list_sessions():
-            if session.normalized_name == normalized_name:
+            if session.session_id in summaries:
+                continue
+            summary = _build_summary(session)
+            self.summary_path(session.session_id).write_text(
+                json.dumps(self._summary_adapter.dump_python(summary, mode="json"), indent=2),
+                encoding="utf-8",
+            )
+            summaries[session.session_id] = summary
+        return sorted(summaries.values(), key=lambda item: item.updated_at, reverse=True)
+
+    def find_by_normalized_name(self, normalized_name: str) -> ResearchSession | None:
+        for summary in self.list_summaries():
+            if summary.normalized_name != normalized_name:
+                continue
+            session = self.load(summary.session_id)
+            if session is not None:
                 return session
         return None
 
     def path(self, session_id: str) -> Path:
         return self._settings.directory / f"{session_id}.json"
+
+    def summary_path(self, session_id: str) -> Path:
+        return self._settings.directory / f"{session_id}.summary.json"
+
+
+def _build_summary(session: ResearchSession) -> ResearchSessionSummary:
+    return ResearchSessionSummary(
+        session_id=session.session_id,
+        name=session.name,
+        normalized_name=session.normalized_name,
+        uses_dedicated_db=session.uses_dedicated_db,
+        db_path=session.db_path,
+        web_tool_call_limit=session.web_tool_call_limit,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        last_trace_id=session.summary.last_trace_id,
+    )

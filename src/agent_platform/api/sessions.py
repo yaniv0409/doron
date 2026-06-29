@@ -5,7 +5,7 @@ import json
 from contextlib import suppress
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from agent_platform.application.graph_snapshot_service import GraphSnapshotService
@@ -16,12 +16,13 @@ from agent_platform.contracts.session import (
     SessionChatResponse,
     SessionDetailResponse,
     SessionGraphResponse,
-    SessionOpenRequest,
     SessionSummaryResponse,
+    SessionOpenRequest,
     SessionTurnResponse,
+    SessionTurnPageResponse,
     SessionUpdateRequest,
 )
-from agent_platform.domain.models import ResearchSession, utc_now
+from agent_platform.domain.models import ResearchSession, ResearchSessionSummary, utc_now
 
 router = APIRouter(tags=["sessions"])
 
@@ -29,22 +30,41 @@ router = APIRouter(tags=["sessions"])
 @router.get("/sessions", response_model=list[SessionSummaryResponse])
 async def list_sessions(http_request: Request) -> list[SessionSummaryResponse]:
     service: SessionService = http_request.app.state.session_service
-    return [_session_summary(item) for item in service.list_sessions()]
+    return [_session_summary(item) for item in service.list_session_summaries()]
 
 
 @router.post("/sessions/open", response_model=SessionDetailResponse)
 async def open_session(request: SessionOpenRequest, http_request: Request) -> SessionDetailResponse:
     service: SessionService = http_request.app.state.session_service
-    return _session_detail(service.open(request))
+    return _session_detail(service.open(request), turn_limit=12)
 
 
 @router.get("/sessions/{session_id}", response_model=SessionDetailResponse)
-async def get_session(session_id: str, http_request: Request) -> SessionDetailResponse:
+async def get_session(
+    session_id: str,
+    http_request: Request,
+    turn_limit: int = Query(default=12, ge=0),
+) -> SessionDetailResponse:
     service: SessionService = http_request.app.state.session_service
     session = service.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "session not found"})
-    return _session_detail(session)
+    return _session_detail(session, turn_limit=turn_limit)
+
+
+@router.get("/sessions/{session_id}/turns", response_model=SessionTurnPageResponse)
+async def get_session_turns(
+    session_id: str,
+    http_request: Request,
+    limit: int = Query(default=12, ge=0),
+    before: str | None = None,
+) -> SessionTurnPageResponse:
+    service: SessionService = http_request.app.state.session_service
+    try:
+        session, turns, has_more = service.get_turn_page(session_id, limit=limit, before_message_id=before)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": str(exc)}) from exc
+    return _turn_page(session, turns, has_more)
 
 
 @router.patch("/sessions/{session_id}", response_model=SessionDetailResponse)
@@ -54,7 +74,7 @@ async def update_session(session_id: str, request: SessionUpdateRequest, http_re
         session = service.update(session_id, request)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": str(exc)}) from exc
-    return _session_detail(session)
+    return _session_detail(session, turn_limit=12)
 
 
 @router.post("/sessions/{session_id}/chat", response_model=SessionChatResponse)
@@ -164,6 +184,17 @@ def _format_sse(event: str, data: dict[str, Any]) -> str:
 
 
 def _session_summary(session: ResearchSession) -> SessionSummaryResponse:
+    if isinstance(session, ResearchSessionSummary):
+        return SessionSummaryResponse(
+            session_id=session.session_id,
+            name=session.name,
+            uses_dedicated_db=session.uses_dedicated_db,
+            db_path=session.db_path,
+            web_tool_call_limit=session.web_tool_call_limit,
+            updated_at=session.updated_at.isoformat(),
+            created_at=session.created_at.isoformat(),
+            last_trace_id=session.last_trace_id,
+        )
     return SessionSummaryResponse(
         session_id=session.session_id,
         name=session.name,
@@ -176,7 +207,8 @@ def _session_summary(session: ResearchSession) -> SessionSummaryResponse:
     )
 
 
-def _session_detail(session: ResearchSession) -> SessionDetailResponse:
+def _session_detail(session: ResearchSession, *, turn_limit: int) -> SessionDetailResponse:
+    turns, has_more = _session_turn_page(session.turns, turn_limit)
     return SessionDetailResponse(
         **_session_summary(session).model_dump(),
         preferred_model=session.preferred_model,
@@ -187,21 +219,44 @@ def _session_detail(session: ResearchSession) -> SessionDetailResponse:
         notes=session.summary.notes,
         recent_tools=session.summary.recent_tools,
         compression_notice=session.summary.compression_notice,
-        turns=[
-            SessionTurnResponse(
-                message_id=item.message_id,
-                role=item.role,
-                content=item.content,
-                created_at=item.created_at.isoformat(),
-                trace_id=item.trace_id,
-                status=item.status,
-                result_format=item.result_format,
-                web_tool_call_limit_used=item.web_tool_call_limit_used,
-                completion=item.completion,
-            )
-            for item in session.turns
-        ],
+        turns=[_turn_response(item) for item in turns],
+        turn_count=len(session.turns),
+        has_more_turns=has_more,
+        oldest_turn_message_id=turns[0].message_id if turns else None,
+        newest_turn_message_id=turns[-1].message_id if turns else None,
         last_error=_mission_error(session.last_error),
+    )
+
+
+def _turn_page(session: ResearchSession, turns, has_more: bool) -> SessionTurnPageResponse:
+    return SessionTurnPageResponse(
+        session_id=session.session_id,
+        turns=[_turn_response(item) for item in turns],
+        turn_count=len(session.turns),
+        has_more_turns=has_more,
+        oldest_turn_message_id=turns[0].message_id if turns else None,
+        newest_turn_message_id=turns[-1].message_id if turns else None,
+    )
+
+
+def _session_turn_page(turns, limit: int):
+    if limit <= 0:
+        return list(turns), False
+    start_index = max(0, len(turns) - limit)
+    return list(turns[start_index:]), start_index > 0
+
+
+def _turn_response(item) -> SessionTurnResponse:
+    return SessionTurnResponse(
+        message_id=item.message_id,
+        role=item.role,
+        content=item.content,
+        created_at=item.created_at.isoformat(),
+        trace_id=item.trace_id,
+        status=item.status,
+        result_format=item.result_format,
+        web_tool_call_limit_used=item.web_tool_call_limit_used,
+        completion=item.completion,
     )
 
 

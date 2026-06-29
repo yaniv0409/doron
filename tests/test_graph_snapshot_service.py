@@ -19,19 +19,23 @@ class FakeGateway:
             {"name": "WorksWith", "type": "REL"},
         ]
 
-    def execute(self, query: str, parameters: dict[str, object] | None = None) -> list[dict[str, object]]:
+    def sample_rows(self, table_name: str, *, kind: str, limit: int) -> list[dict[str, object]]:
+        if kind == "REL":
+            query = f"MATCH (a)-[r:`{table_name}`]->(b) RETURN a, r, b LIMIT {limit};"
+        else:
+            query = f"MATCH (n:`{table_name}`) RETURN n LIMIT {limit};"
         self.queries.append(query)
-        if query == "MATCH (n:`Company`) RETURN n;":
+        if query.startswith("MATCH (n:`Company`)"):
             return [
                 {"n": {"_id": "company:1", "_label": "Company", "_properties": {"name": "Acme"}}},
                 {"n": {"_id": "company:2", "_label": "Company", "_properties": {"name": "Globex"}}},
             ]
-        if query == "MATCH (n:`Person`) RETURN n;":
+        if query.startswith("MATCH (n:`Person`)"):
             return [
                 {"n": {"_id": "person:1", "_label": "Person", "_properties": {"name": "Ada"}}},
                 {"n": {"_id": "person:2", "_label": "Person", "_properties": {"name": "Linus"}}},
             ]
-        if query == "MATCH (a)-[r:`WorksWith`]->(b) RETURN a, r, b;":
+        if query.startswith("MATCH (a)-[r:`WorksWith`]"):
             return [
                 {
                     "a": {"_id": "person:1", "_label": "Person", "_properties": {"name": "Ada"}},
@@ -49,12 +53,15 @@ class FakeGateway:
 
 def test_graph_snapshot_service_scans_all_tables(monkeypatch) -> None:
     monkeypatch.setattr(snapshot_service, "KuzuGateway", FakeGateway)
-    service = snapshot_service.GraphSnapshotService(settings=object())
+    service = snapshot_service.GraphSnapshotService(settings=type("Settings", (), {"graph_node_limit": 10, "graph_edge_limit": 10})())
 
     response = service.build_snapshot("session-1", "/tmp/demo.kuzu")
 
     assert response.node_count == 4
     assert response.edge_count == 2
+    assert response.node_limit == 10
+    assert response.edge_limit == 10
+    assert response.is_truncated is False
     assert {node.id for node in response.nodes} == {
         "company:1",
         "company:2",
@@ -64,7 +71,26 @@ def test_graph_snapshot_service_scans_all_tables(monkeypatch) -> None:
     assert {edge.id for edge in response.edges} == {"rel:1", "rel:2"}
     assert FakeGateway.last_instance is not None
     assert FakeGateway.last_instance.queries == [
-        "MATCH (n:`Company`) RETURN n;",
-        "MATCH (n:`Person`) RETURN n;",
-        "MATCH (a)-[r:`WorksWith`]->(b) RETURN a, r, b;",
+        "MATCH (n:`Company`) RETURN n LIMIT 10;",
+        "MATCH (n:`Person`) RETURN n LIMIT 8;",
+        "MATCH (a)-[r:`WorksWith`]->(b) RETURN a, r, b LIMIT 10;",
+    ]
+
+
+def test_graph_snapshot_service_respects_limits(monkeypatch) -> None:
+    monkeypatch.setattr(snapshot_service, "KuzuGateway", FakeGateway)
+    service = snapshot_service.GraphSnapshotService(settings=type("Settings", (), {"graph_node_limit": 3, "graph_edge_limit": 1})())
+
+    response = service.build_snapshot("session-1", "/tmp/demo.kuzu")
+
+    assert response.node_count == 3
+    assert response.edge_count == 1
+    assert response.is_truncated is True
+    assert response.node_limit == 3
+    assert response.edge_limit == 1
+    assert FakeGateway.last_instance is not None
+    assert FakeGateway.last_instance.queries == [
+        "MATCH (n:`Company`) RETURN n LIMIT 3;",
+        "MATCH (n:`Person`) RETURN n LIMIT 1;",
+        "MATCH (a)-[r:`WorksWith`]->(b) RETURN a, r, b LIMIT 1;",
     ]

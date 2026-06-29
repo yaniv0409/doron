@@ -414,6 +414,18 @@ class SessionSummary(BaseModel):
     last_trace_id: str | None = None
 
 
+class ResearchSessionSummary(BaseModel):
+    session_id: str
+    name: str
+    normalized_name: str
+    uses_dedicated_db: bool = False
+    db_path: str
+    web_tool_call_limit: int | None = Field(default=None, ge=0)
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+    last_trace_id: str | None = None
+
+
 class SessionAgentContext(BaseModel):
     session_id: str
     active_turns: list[SessionTurn] = Field(default_factory=list)

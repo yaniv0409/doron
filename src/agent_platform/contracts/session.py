@@ -40,6 +40,15 @@ class SessionSummaryResponse(BaseModel):
     last_trace_id: str | None = None
 
 
+class SessionTurnPageResponse(BaseModel):
+    session_id: str
+    turns: list[SessionTurnResponse] = Field(default_factory=list)
+    turn_count: int = 0
+    has_more_turns: bool = False
+    oldest_turn_message_id: str | None = None
+    newest_turn_message_id: str | None = None
+
+
 class SessionTurnResponse(BaseModel):
     message_id: str
     role: str
@@ -62,6 +71,10 @@ class SessionDetailResponse(SessionSummaryResponse):
     recent_tools: list[str] = Field(default_factory=list)
     compression_notice: str | None = None
     turns: list[SessionTurnResponse] = Field(default_factory=list)
+    turn_count: int = 0
+    has_more_turns: bool = False
+    oldest_turn_message_id: str | None = None
+    newest_turn_message_id: str | None = None
     last_error: MissionRunError | None = None
 
 
@@ -108,6 +121,9 @@ class SessionGraphResponse(BaseModel):
     generated_at: str
     node_count: int
     edge_count: int
+    node_limit: int | None = None
+    edge_limit: int | None = None
+    is_truncated: bool = False
     nodes: list[GraphNodeResponse] = Field(default_factory=list)
     edges: list[GraphEdgeResponse] = Field(default_factory=list)
 
