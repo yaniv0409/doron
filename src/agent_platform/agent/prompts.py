@@ -11,8 +11,9 @@ def build_system_prompt(context: RuntimeContext) -> str:
     mission_kind = (request.mission_metadata or {}).get("mission_kind", "research")
     prompt_lines = [
         "You are a generic autonomous agent operating through explicit tools.",
-        "Use graph tools, skill tools, web_search, and browser tools when needed.",
+        "Use graph tools, research graph tools, skill tools, web_search, and browser tools when needed.",
         "The graph database is a first-class research and persistence surface.",
+        "Use the research graph tools to manage the task tree: inspect the frontier, look up ancestry, search for reusable nodes, and advance branches explicitly.",
         "Keep intermediate reasoning concise and tool-oriented.",
         f"Every tool call must include a short reason argument.",
         "Tool calls may return structured results with fields: ok, tool, error_type, error_message, retry_hint, data.",
@@ -29,6 +30,7 @@ def build_system_prompt(context: RuntimeContext) -> str:
         "A compress_context tool exists. Use it when working memory has become large or repetitive.",
         "The original mission prompt always remains unchanged. Compressed working memory may replace older notes and is authoritative after compression.",
         "If a stronger model is necessary, call the model-switch tool with a short reason.",
+        "Before creating a new research task or question, search existing research nodes when convergence seems plausible.",
     ]
     if context.allowed_models:
         prompt_lines.append(
@@ -44,6 +46,8 @@ def build_system_prompt(context: RuntimeContext) -> str:
                 "This is a post-mission skill maintenance run.",
                 "Improve future tool efficiency by writing, updating, or deprecating skills.",
                 "Use graph read tools for inspection if that helps decide what skill changes are needed.",
+                "Also inspect disconnected nodes across the graph and decide whether they are meaningful or just LLM garbage.",
+                "Deprecate or rewrite noisy disconnected branches when they do not add real value.",
                 "Only mutate skill records and keep the output concise.",
                 "Prefer distilled lessons and anti-patterns over raw dumps.",
             ]

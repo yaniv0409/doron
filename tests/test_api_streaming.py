@@ -74,7 +74,12 @@ def test_run_mission_streams_progress_and_final_event() -> None:
             async with client.stream(
                 "POST",
                 "/missions/run",
-                json={"prompt": "hello", "db_path": "/tmp/db.kuzu", "stream": True},
+                json={
+                    "prompt": "hello",
+                    "memory_db_path": "/tmp/db/memory.kuzu",
+                    "research_meta_db_path": "/tmp/db/research_meta.kuzu",
+                    "stream": True,
+                },
             ) as response:
                 assert response.status_code == 200
                 assert response.headers["content-type"].startswith("text/event-stream")
@@ -106,7 +111,11 @@ def test_run_mission_blocking_json_remains_available() -> None:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/missions/run",
-                json={"prompt": "hello", "db_path": "/tmp/db.kuzu"},
+                json={
+                    "prompt": "hello",
+                    "memory_db_path": "/tmp/db/memory.kuzu",
+                    "research_meta_db_path": "/tmp/db/research_meta.kuzu",
+                },
             )
 
         assert response.status_code == 200

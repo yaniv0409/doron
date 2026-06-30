@@ -191,6 +191,18 @@ def test_web_search_returns_normalized_result(monkeypatch) -> None:
     assert runtime.context.tool_calls[0].result_summary == "returned 2 web result(s)"
 
 
+def test_web_search_reports_missing_ddgs_dependency(monkeypatch) -> None:
+    runtime = build_runtime()
+    monkeypatch.setattr(web_tools, "DDGS", None)
+
+    result = asyncio.run(web_search(runtime, "elon musk companies", "find likely sources"))
+
+    assert result.ok is False
+    assert result.error_type == "duckduckgo_search_unavailable"
+    assert "ddgs" in (result.error_message or "").lower()
+    assert runtime.context.tool_calls[0].result_summary.startswith("duckduckgo_search_unavailable:")
+
+
 def test_system_prompt_instructs_agent_to_continue_after_tool_failure() -> None:
     runtime = build_runtime()
 

@@ -20,7 +20,14 @@ from agent_platform.infrastructure.logging import get_logger
 try:
     from pydantic_ai.messages import DocumentUrl, UserContent
 except ImportError:  # pragma: no cover
-    DocumentUrl = Any
+    from dataclasses import dataclass
+
+    @dataclass(slots=True)
+    class DocumentUrl:
+        url: str
+        media_type: str | None = None
+        identifier: str | None = None
+
     UserContent = Any
 
 
@@ -556,7 +563,7 @@ class MissionService:
         metadata = runtime.context.mission_request.mission_metadata or {}
         if metadata.get("mission_kind") == "skill_maintenance":
             runtime.context.memory_tool_call_budget = runtime.services.settings.memory.maintenance_tool_budget
-            runtime.services.memory_manager.ensure_schema(runtime.research_meta_db)
+            runtime.services.memory_manager.ensure_schema(runtime.memory_db)
 
     def _write_trace_skeleton(self, runtime: MissionRuntime, request_payload: dict[str, Any]) -> None:
         metadata = runtime.context.mission_request.mission_metadata or {}
@@ -590,7 +597,7 @@ class MissionService:
             if isinstance(parent_trace_id, str) and parent_trace_id:
                 trace_text = runtime.services.trace_store.read_raw_trace_text(parent_trace_id)
                 results = await runtime.services.memory_manager.related_for_maintenance(
-                    runtime.research_meta_db,
+                    runtime.memory_db,
                     trace_text,
                 )
                 runtime.context.memory_retrievals.append(
@@ -653,6 +660,8 @@ class MissionService:
                 "Your mission is to harden Doron's skills after a completed mission.",
                 "Use skill tools to write, update, or deprecate skills.",
                 "Use graph read tools to inspect existing graph state when that helps decide what skill changes are needed.",
+                "Also inspect disconnected nodes across the graph and decide whether they are meaningful or just LLM garbage.",
+                "Deprecate or rewrite noisy disconnected branches when they do not add real value.",
                 "Encourage good tool use and discourage wasteful repeated web source rediscovery.",
                 "Only mutate skill records.",
                 f"Parent trace ID: {trace.trace_id}",

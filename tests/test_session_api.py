@@ -167,7 +167,6 @@ def test_open_resume_and_update_session(tmp_path: Path) -> None:
     settings.sessions = SessionSettings(
         directory=tmp_path / "sessions-open",
         db_directory=tmp_path / "dbs-open",
-        shared_db_path=tmp_path / "dbs-open" / "shared.kuzu",
         shared_db_dir=tmp_path / "dbs-open" / "shared",
     )
     mission_service = FakeMissionService()
@@ -193,7 +192,6 @@ def test_grouped_open_and_fork_inheritance(tmp_path: Path) -> None:
     settings.sessions = SessionSettings(
         directory=tmp_path / "sessions-groups",
         db_directory=tmp_path / "dbs-groups",
-        shared_db_path=tmp_path / "dbs-groups" / "shared.kuzu",
         shared_db_dir=tmp_path / "dbs-groups" / "shared",
     )
     mission_service = FakeMissionService()
@@ -251,7 +249,6 @@ def test_fork_can_clone_context(tmp_path: Path) -> None:
     settings.sessions = SessionSettings(
         directory=tmp_path / "sessions-fork-context",
         db_directory=tmp_path / "dbs-fork-context",
-        shared_db_path=tmp_path / "dbs-fork-context" / "shared.kuzu",
         shared_db_dir=tmp_path / "dbs-fork-context" / "shared",
     )
     mission_service = FakeMissionService()
@@ -290,7 +287,6 @@ def test_list_sessions_uses_summary_records(tmp_path: Path) -> None:
         settings.sessions = SessionSettings(
             directory=tmp_path / "sessions-list",
             db_directory=tmp_path / "dbs-list",
-        shared_db_path=tmp_path / "dbs-list" / "shared.kuzu",
         shared_db_dir=tmp_path / "dbs-list" / "shared",
         )
         mission_service = FakeMissionService()
@@ -316,7 +312,6 @@ def test_session_chat_persists_and_uses_web_limit(tmp_path: Path) -> None:
     settings.sessions = SessionSettings(
         directory=tmp_path / "sessions-chat",
         db_directory=tmp_path / "dbs-chat",
-        shared_db_path=tmp_path / "dbs-chat" / "shared.kuzu",
         shared_db_dir=tmp_path / "dbs-chat" / "shared",
     )
     mission_service = FakeMissionService()
@@ -335,6 +330,7 @@ def test_session_chat_persists_and_uses_web_limit(tmp_path: Path) -> None:
     assert completion.finish_reason == "stop"
     assert result_format == ResultFormat.TEXT
     assert mission_service.requests[0].web_tool_call_limit == 7
+    assert mission_service.requests[0].mission_metadata["research_root_prompt"] == "Research NVIDIA"
     assert len(updated.turns) == 2
     assert updated.summary.last_trace_id == "trace-1"
     context_store = SessionContextStore(settings.sessions)
@@ -349,7 +345,6 @@ def test_session_prompt_prioritizes_current_mission(tmp_path: Path) -> None:
     settings.sessions = SessionSettings(
         directory=tmp_path / "sessions-prompt",
         db_directory=tmp_path / "dbs-prompt",
-        shared_db_path=tmp_path / "dbs-prompt" / "shared.kuzu",
         shared_db_dir=tmp_path / "dbs-prompt" / "shared",
     )
     mission_service = FakeMissionService()
@@ -365,6 +360,7 @@ def test_session_prompt_prioritizes_current_mission(tmp_path: Path) -> None:
     assert "Recent active turns:" in prompt
     assert "User: First mission" in prompt
     assert prompt.index("Current mission:\nSecond mission is the main one") < prompt.index("Recent active turns:")
+    assert mission_service.requests[-1].mission_metadata["research_root_prompt"] == "First mission"
 
 
 def test_soft_stop_injects_wrapup_prompt_and_resumes(tmp_path: Path) -> None:
@@ -372,7 +368,6 @@ def test_soft_stop_injects_wrapup_prompt_and_resumes(tmp_path: Path) -> None:
     settings.sessions = SessionSettings(
         directory=tmp_path / "sessions-soft-stop",
         db_directory=tmp_path / "dbs-soft-stop",
-        shared_db_path=tmp_path / "dbs-soft-stop" / "shared.kuzu",
         shared_db_dir=tmp_path / "dbs-soft-stop" / "shared",
     )
     mission_service = FakeMissionService()
@@ -405,7 +400,6 @@ def test_hard_stop_cancels_active_run_and_blocks_future_messages(tmp_path: Path)
     settings.sessions = SessionSettings(
         directory=tmp_path / "sessions-hard-stop",
         db_directory=tmp_path / "dbs-hard-stop",
-        shared_db_path=tmp_path / "dbs-hard-stop" / "shared.kuzu",
         shared_db_dir=tmp_path / "dbs-hard-stop" / "shared",
     )
     mission_service = FakeMissionService()
@@ -432,7 +426,6 @@ def test_session_context_compacts_without_dropping_visible_history(tmp_path: Pat
     settings.sessions = SessionSettings(
         directory=tmp_path / "sessions-compact",
         db_directory=tmp_path / "dbs-compact",
-        shared_db_path=tmp_path / "dbs-compact" / "shared.kuzu",
         shared_db_dir=tmp_path / "dbs-compact" / "shared",
         active_context_turn_limit=2,
     )
@@ -470,7 +463,6 @@ def test_session_steer_restarts_active_run_with_preserved_context(tmp_path: Path
         settings.sessions = SessionSettings(
             directory=tmp_path / "sessions-steer",
             db_directory=tmp_path / "dbs-steer",
-            shared_db_path=tmp_path / "dbs-steer" / "shared.kuzu",
             shared_db_dir=tmp_path / "dbs-steer" / "shared",
         )
         mission_service = SteerableFakeMissionService()
@@ -506,7 +498,6 @@ def test_session_routes_stream_and_graph(tmp_path: Path) -> None:
         settings.sessions = SessionSettings(
             directory=tmp_path / "sessions-routes",
             db_directory=tmp_path / "dbs-routes",
-            shared_db_path=tmp_path / "dbs-routes" / "shared.kuzu",
             shared_db_dir=tmp_path / "dbs-routes" / "shared",
         )
         mission_service = FakeMissionService()
@@ -549,7 +540,6 @@ def test_session_stop_routes_update_status_and_resume(tmp_path: Path) -> None:
         settings.sessions = SessionSettings(
             directory=tmp_path / "sessions-stop-routes",
             db_directory=tmp_path / "dbs-stop-routes",
-            shared_db_path=tmp_path / "dbs-stop-routes" / "shared.kuzu",
             shared_db_dir=tmp_path / "dbs-stop-routes" / "shared",
         )
         mission_service = FakeMissionService()
@@ -590,7 +580,6 @@ def test_session_steer_route_requires_active_run(tmp_path: Path) -> None:
         settings.sessions = SessionSettings(
             directory=tmp_path / "sessions-steer-route",
             db_directory=tmp_path / "dbs-steer-route",
-            shared_db_path=tmp_path / "dbs-steer-route" / "shared.kuzu",
             shared_db_dir=tmp_path / "dbs-steer-route" / "shared",
         )
         mission_service = FakeMissionService()
@@ -616,7 +605,6 @@ def test_session_routes_page_turns(tmp_path: Path) -> None:
         settings.sessions = SessionSettings(
             directory=tmp_path / "sessions-page",
             db_directory=tmp_path / "dbs-page",
-            shared_db_path=tmp_path / "dbs-page" / "shared.kuzu",
             shared_db_dir=tmp_path / "dbs-page" / "shared",
         )
         mission_service = FakeMissionService()

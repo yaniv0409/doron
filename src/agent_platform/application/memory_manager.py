@@ -26,7 +26,7 @@ class MemoryManager:
         if not self._settings.enabled:
             return
         results = await self.search(
-            runtime.research_meta_db,
+            runtime.memory_db,
             runtime.context.mission_request.prompt,
             kinds=["skill"],
             limit=self._settings.preflight_limit,

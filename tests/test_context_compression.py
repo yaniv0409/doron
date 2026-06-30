@@ -45,7 +45,8 @@ class FakeChatClient:
 def build_runtime() -> SimpleNamespace:
     request = MissionRequest(
         prompt="Find all companies related to Elon and summarize them.",
-        db_path="/tmp/demo.kuzu",
+        memory_db_path="/tmp/demo/memory.kuzu",
+        research_meta_db_path="/tmp/demo/research_meta.kuzu",
         allowed_models=["openai/gpt-4.1-mini", "openai/gpt-5.2"],
     )
     allowed_models = [

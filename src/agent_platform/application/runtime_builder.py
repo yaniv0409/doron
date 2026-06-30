@@ -4,6 +4,7 @@ import uuid
 from dataclasses import dataclass
 
 from agent_platform.application.memory_manager import MemoryManager
+from agent_platform.application.research_graph_manager import ResearchGraphManager
 from agent_platform.config.settings import AppSettings
 from agent_platform.application.context_compression import ContextCompressor
 from agent_platform.application.live_events import emit_runtime_event
@@ -26,6 +27,7 @@ class RuntimeServices:
     chat_client: OpenRouterChatClient
     context_compressor: ContextCompressor
     memory_manager: MemoryManager
+    research_graph_manager: ResearchGraphManager
 
 
 @dataclass(slots=True)
@@ -49,6 +51,7 @@ class RuntimeBuilder:
             chat_client=OpenRouterChatClient(settings.openrouter),
             context_compressor=ContextCompressor(settings.compression),
             memory_manager=MemoryManager(settings.memory, embedding_client),
+            research_graph_manager=ResearchGraphManager(),
         )
 
     def build(self, request: MissionRequest) -> MissionRuntime:

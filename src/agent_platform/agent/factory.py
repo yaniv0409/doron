@@ -22,6 +22,15 @@ from agent_platform.tools.memory_tools import (
     skill_update as run_skill_update,
     skill_write as run_skill_write,
 )
+from agent_platform.tools.research_tools import (
+    advance_existing as run_advance_existing,
+    advance_new as run_advance_new,
+    create_root_work_item as run_create_root_work_item,
+    get_ancestry as run_get_ancestry,
+    get_descendants as run_get_descendants,
+    get_frontier as run_get_frontier,
+    search_research_nodes as run_search_research_nodes,
+)
 from agent_platform.tools.model_tools import request_model_switch
 from agent_platform.tools.web_tools import get_page_text, open_url, web_search as run_web_search
 
@@ -94,6 +103,124 @@ class AgentFactory:
             tool_names.append("skill_search")
 
         if not is_skill_maintenance:
+            @agent.tool
+            async def create_root_work_item(
+                ctx: RunContext[MissionRuntime],
+                prompt: str,
+                reason: str,
+            ) -> ToolResult:
+                arguments = {"prompt": prompt, "reason": reason}
+                self._emit_tool_started(ctx.deps, "create_root_work_item", arguments)
+                result = await run_create_root_work_item(ctx.deps, prompt, reason)
+                self._emit_tool_completed(ctx.deps, "create_root_work_item", arguments, result)
+                return result
+
+            tool_names.append("create_root_work_item")
+
+            @agent.tool
+            async def advance_new(
+                ctx: RunContext[MissionRuntime],
+                from_node_id: str,
+                edge: dict[str, Any],
+                new_node: dict[str, Any],
+                reason: str,
+            ) -> ToolResult:
+                arguments = {
+                    "from_node_id": from_node_id,
+                    "edge": edge,
+                    "new_node": new_node,
+                    "reason": reason,
+                }
+                self._emit_tool_started(ctx.deps, "advance_new", arguments)
+                result = await run_advance_new(ctx.deps, from_node_id, edge, new_node, reason)
+                self._emit_tool_completed(ctx.deps, "advance_new", arguments, result)
+                return result
+
+            tool_names.append("advance_new")
+
+            @agent.tool
+            async def advance_existing(
+                ctx: RunContext[MissionRuntime],
+                from_node_id: str,
+                to_node_id: str,
+                edge: dict[str, Any],
+                reason: str,
+            ) -> ToolResult:
+                arguments = {
+                    "from_node_id": from_node_id,
+                    "to_node_id": to_node_id,
+                    "edge": edge,
+                    "reason": reason,
+                }
+                self._emit_tool_started(ctx.deps, "advance_existing", arguments)
+                result = await run_advance_existing(ctx.deps, from_node_id, to_node_id, edge, reason)
+                self._emit_tool_completed(ctx.deps, "advance_existing", arguments, result)
+                return result
+
+            tool_names.append("advance_existing")
+
+            @agent.tool
+            async def get_frontier(ctx: RunContext[MissionRuntime], reason: str) -> ToolResult:
+                arguments = {"reason": reason}
+                self._emit_tool_started(ctx.deps, "get_frontier", arguments)
+                result = await run_get_frontier(ctx.deps, reason)
+                self._emit_tool_completed(ctx.deps, "get_frontier", arguments, result)
+                return result
+
+            tool_names.append("get_frontier")
+
+            @agent.tool
+            async def get_ancestry(
+                ctx: RunContext[MissionRuntime],
+                node_id: str,
+                depth: int,
+                reason: str,
+            ) -> ToolResult:
+                arguments = {"node_id": node_id, "depth": depth, "reason": reason}
+                self._emit_tool_started(ctx.deps, "get_ancestry", arguments)
+                result = await run_get_ancestry(ctx.deps, node_id, depth, reason)
+                self._emit_tool_completed(ctx.deps, "get_ancestry", arguments, result)
+                return result
+
+            tool_names.append("get_ancestry")
+
+            @agent.tool
+            async def get_descendants(
+                ctx: RunContext[MissionRuntime],
+                node_id: str,
+                depth: int,
+                mode: str,
+                reason: str,
+            ) -> ToolResult:
+                arguments = {"node_id": node_id, "depth": depth, "mode": mode, "reason": reason}
+                self._emit_tool_started(ctx.deps, "get_descendants", arguments)
+                result = await run_get_descendants(ctx.deps, node_id, depth, mode, reason)
+                self._emit_tool_completed(ctx.deps, "get_descendants", arguments, result)
+                return result
+
+            tool_names.append("get_descendants")
+
+            @agent.tool
+            async def search_research_nodes(
+                ctx: RunContext[MissionRuntime],
+                query: str,
+                reason: str,
+                limit: int = 8,
+                include_failures: bool = False,
+            ) -> ToolResult:
+                arguments = {
+                    "query": query,
+                    "limit": limit,
+                    "include_failures": include_failures,
+                    "reason": reason,
+                }
+                self._emit_tool_started(ctx.deps, "search_research_nodes", arguments)
+                result = await run_search_research_nodes(ctx.deps, query, limit, include_failures, reason)
+                self._emit_tool_completed(ctx.deps, "search_research_nodes", arguments, result)
+                return result
+
+            tool_names.append("search_research_nodes")
+
             @agent.tool
             async def read_graph(
                 ctx: RunContext[MissionRuntime],
@@ -358,7 +485,10 @@ class AgentFactory:
 
     def _summarize_tool_result(self, name: str, result: ToolResult) -> str:
         if not result.ok:
-            return result.retry_hint or result.error_message or name
+            failure = result.error_message or result.retry_hint or name
+            if result.error_type:
+                return f"{result.error_type}: {failure}"
+            return failure
         if name == "web_search" and isinstance(result.data, dict):
             hits = result.data.get("hits")
             if isinstance(hits, list):

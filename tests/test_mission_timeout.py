@@ -37,6 +37,9 @@ class FakeTraceStore:
     def trace_path(self, trace_id: str):
         return Path("/tmp") / trace_id
 
+    def read_trace_head(self, trace_id: str, chars: int) -> str:
+        return self.read_raw_trace_text(trace_id)[:chars]
+
 
 class FakeChatClient:
     async def complete_json(self, *, model: str, system_prompt: str, user_prompt: str):
@@ -76,6 +79,10 @@ def test_mission_service_times_out_and_writes_progress(tmp_path: Path) -> None:
     settings.traces.directory = tmp_path / "traces"
     settings.traces.checkpoint_directory = tmp_path / "checkpoints"
     service = MissionService(settings)
+    service._runtime_builder.services.research_graph_manager = SimpleNamespace(
+        ensure_schema=lambda db: None,
+        ensure_root=lambda db, prompt, source_trace_id=None: None,
+    )
     service._agent_factory = FakeAgentFactory()
     service._runtime_builder.build = lambda request: SimpleNamespace(
         context=SimpleNamespace(
@@ -98,9 +105,15 @@ def test_mission_service_times_out_and_writes_progress(tmp_path: Path) -> None:
             compressed_memory=None,
         ),
         browser=SimpleNamespace(close=lambda: asyncio.sleep(0)),
+        memory_db=SimpleNamespace(close=lambda: None),
+        research_meta_db=SimpleNamespace(close=lambda: None),
         services=service._runtime_builder.services,
     )
-    request = MissionRequest(prompt="hang", db_path="/tmp/db.kuzu")
+    request = MissionRequest(
+        prompt="hang",
+        memory_db_path="/tmp/db/memory.kuzu",
+        research_meta_db_path="/tmp/db/research_meta.kuzu",
+    )
 
     result = asyncio.run(service.run(request))
 
@@ -118,13 +131,21 @@ def test_mission_service_compresses_and_retries_on_context_overflow(tmp_path: Pa
     settings.traces.directory = tmp_path / "traces"
     settings.traces.checkpoint_directory = tmp_path / "checkpoints"
     service = MissionService(settings)
+    service._runtime_builder.services.research_graph_manager = SimpleNamespace(
+        ensure_schema=lambda db: None,
+        ensure_root=lambda db, prompt, source_trace_id=None: None,
+    )
     service._runtime_builder.services.trace_store = FakeTraceStore()
     service._runtime_builder.services.chat_client = FakeChatClient()
     service._runtime_builder.services.model_catalog = SimpleNamespace(
         strongest_allowed=lambda allowed: allowed[-1],
     )
 
-    request = MissionRequest(prompt="hello", db_path="/tmp/db.kuzu")
+    request = MissionRequest(
+        prompt="hello",
+        memory_db_path="/tmp/db/memory.kuzu",
+        research_meta_db_path="/tmp/db/research_meta.kuzu",
+    )
     current_model = ModelDescriptor(name="openai/gpt-4.1-mini", rank=10, context_window=4000)
     stronger_model = ModelDescriptor(name="openai/gpt-5.2", rank=100, context_window=32000)
     context = RuntimeContext(
@@ -136,7 +157,8 @@ def test_mission_service_compresses_and_retries_on_context_overflow(tmp_path: Pa
     )
     runtime = SimpleNamespace(
         context=context,
-        db=SimpleNamespace(),
+        memory_db=SimpleNamespace(close=lambda: None),
+        research_meta_db=SimpleNamespace(close=lambda: None),
         browser=SimpleNamespace(close=lambda: asyncio.sleep(0)),
         services=service._runtime_builder.services,
     )
@@ -173,13 +195,21 @@ def test_mission_service_does_not_compress_on_other_model_errors(tmp_path: Path)
     settings.traces.directory = tmp_path / "traces"
     settings.traces.checkpoint_directory = tmp_path / "checkpoints"
     service = MissionService(settings)
+    service._runtime_builder.services.research_graph_manager = SimpleNamespace(
+        ensure_schema=lambda db: None,
+        ensure_root=lambda db, prompt, source_trace_id=None: None,
+    )
     service._runtime_builder.services.trace_store = FakeTraceStore()
     service._runtime_builder.services.chat_client = FakeChatClient()
     service._runtime_builder.services.model_catalog = SimpleNamespace(
         strongest_allowed=lambda allowed: allowed[-1],
     )
 
-    request = MissionRequest(prompt="hello", db_path="/tmp/db.kuzu")
+    request = MissionRequest(
+        prompt="hello",
+        memory_db_path="/tmp/db/memory.kuzu",
+        research_meta_db_path="/tmp/db/research_meta.kuzu",
+    )
     current_model = ModelDescriptor(name="openai/gpt-4.1-mini", rank=10, context_window=4000)
     stronger_model = ModelDescriptor(name="openai/gpt-5.2", rank=100, context_window=32000)
     context = RuntimeContext(
@@ -191,7 +221,8 @@ def test_mission_service_does_not_compress_on_other_model_errors(tmp_path: Path)
     )
     runtime = SimpleNamespace(
         context=context,
-        db=SimpleNamespace(),
+        memory_db=SimpleNamespace(close=lambda: None),
+        research_meta_db=SimpleNamespace(close=lambda: None),
         browser=SimpleNamespace(close=lambda: asyncio.sleep(0)),
         services=service._runtime_builder.services,
     )
@@ -222,13 +253,21 @@ def test_mission_service_continues_when_finish_reason_is_length(tmp_path: Path) 
     settings.traces.directory = tmp_path / "traces"
     settings.traces.checkpoint_directory = tmp_path / "checkpoints"
     service = MissionService(settings)
+    service._runtime_builder.services.research_graph_manager = SimpleNamespace(
+        ensure_schema=lambda db: None,
+        ensure_root=lambda db, prompt, source_trace_id=None: None,
+    )
     service._runtime_builder.services.trace_store = FakeTraceStore()
     service._runtime_builder.services.chat_client = FakeChatClient()
     service._runtime_builder.services.model_catalog = SimpleNamespace(
         strongest_allowed=lambda allowed: allowed[-1],
     )
 
-    request = MissionRequest(prompt="hello", db_path="/tmp/db.kuzu")
+    request = MissionRequest(
+        prompt="hello",
+        memory_db_path="/tmp/db/memory.kuzu",
+        research_meta_db_path="/tmp/db/research_meta.kuzu",
+    )
     current_model = ModelDescriptor(name="openai/gpt-4.1-mini", rank=10, context_window=4000)
     stronger_model = ModelDescriptor(name="openai/gpt-5.2", rank=100, context_window=32000)
     context = RuntimeContext(
@@ -240,7 +279,8 @@ def test_mission_service_continues_when_finish_reason_is_length(tmp_path: Path) 
     )
     runtime = SimpleNamespace(
         context=context,
-        db=SimpleNamespace(),
+        memory_db=SimpleNamespace(close=lambda: None),
+        research_meta_db=SimpleNamespace(close=lambda: None),
         browser=SimpleNamespace(close=lambda: asyncio.sleep(0)),
         services=service._runtime_builder.services,
     )
@@ -275,6 +315,10 @@ def test_skill_maintenance_run_attaches_parent_trace(tmp_path: Path) -> None:
     settings.traces.directory = tmp_path / "traces"
     settings.traces.checkpoint_directory = tmp_path / "checkpoints"
     service = MissionService(settings)
+    service._runtime_builder.services.research_graph_manager = SimpleNamespace(
+        ensure_schema=lambda db: None,
+        ensure_root=lambda db, prompt, source_trace_id=None: None,
+    )
     service._runtime_builder.services.trace_store = FakeTraceStore()
     service._runtime_builder.services.chat_client = FakeChatClient()
     service._runtime_builder.services.model_catalog = SimpleNamespace(
@@ -287,7 +331,8 @@ def test_skill_maintenance_run_attaches_parent_trace(tmp_path: Path) -> None:
 
     request = MissionRequest(
         prompt="maintain skills",
-        db_path="/tmp/db.kuzu",
+        memory_db_path="/tmp/db/memory.kuzu",
+        research_meta_db_path="/tmp/db/research_meta.kuzu",
         mission_metadata={"mission_kind": "skill_maintenance", "parent_trace_id": "parent-trace"},
         web_enabled=False,
     )
@@ -302,7 +347,8 @@ def test_skill_maintenance_run_attaches_parent_trace(tmp_path: Path) -> None:
     )
     runtime = SimpleNamespace(
         context=context,
-        db=SimpleNamespace(),
+        memory_db=SimpleNamespace(close=lambda: None),
+        research_meta_db=SimpleNamespace(close=lambda: None),
         browser=SimpleNamespace(close=lambda: asyncio.sleep(0)),
         services=service._runtime_builder.services,
     )

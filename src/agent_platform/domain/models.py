@@ -194,6 +194,36 @@ class MemoryMutationRecord(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
 
 
+class ResearchNodeRecord(BaseModel):
+    id: str
+    kind: str
+    title: str
+    body: str
+    status: str = "open"
+    priority: int | None = None
+    confidence: float | None = None
+    failure_kind: str | None = None
+    is_root: bool = False
+    score: float | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    closed_at: datetime | None = None
+    source_trace_id: str | None = None
+
+
+class ResearchEdgeRecord(BaseModel):
+    id: str
+    from_node_id: str
+    to_node_id: str
+    kind: str
+    content: str
+    transition_kind: str
+    confidence: float | None = None
+    evidence_kind: str | None = None
+    created_at: datetime | None = None
+    source_trace_id: str | None = None
+
+
 class CompressionEvent(BaseModel):
     trigger: str
     summarizer_model: str

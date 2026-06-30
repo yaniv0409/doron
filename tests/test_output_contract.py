@@ -34,7 +34,15 @@ def _build_runtime_wrapper(request: MissionRequest, settings: AppSettings) -> Si
     context = _build_runtime(request)
     return SimpleNamespace(
         context=context,
-        services=SimpleNamespace(settings=settings),
+        services=SimpleNamespace(
+            settings=settings,
+            research_graph_manager=SimpleNamespace(
+                ensure_schema=lambda db: None,
+                ensure_root=lambda db, prompt, source_trace_id=None: None,
+            ),
+        ),
+        memory_db=SimpleNamespace(),
+        research_meta_db=SimpleNamespace(),
     )
 
 
@@ -76,7 +84,13 @@ def test_agent_factory_passes_structured_output_type() -> None:
     settings.openrouter.app_url = "https://example.test"
     settings.openrouter.app_title = "wbi"
     runtime = _build_runtime_wrapper(
-        MissionRequest(prompt="Return the answer", db_path="/tmp/db.kuzu", output_schema=schema, web_enabled=False),
+        MissionRequest(
+            prompt="Return the answer",
+            memory_db_path="/tmp/db/memory.kuzu",
+            research_meta_db_path="/tmp/db/research_meta.kuzu",
+            output_schema=schema,
+            web_enabled=False,
+        ),
         settings,
     )
 
@@ -127,7 +141,12 @@ def test_agent_factory_registers_visible_web_search() -> None:
     settings = AppSettings()
     settings.openrouter.api_key = "test-key"
     runtime = _build_runtime_wrapper(
-        MissionRequest(prompt="Search the web", db_path="/tmp/db.kuzu", web_enabled=True),
+        MissionRequest(
+            prompt="Search the web",
+            memory_db_path="/tmp/db/memory.kuzu",
+            research_meta_db_path="/tmp/db/research_meta.kuzu",
+            web_enabled=True,
+        ),
         settings,
     )
 
@@ -174,7 +193,8 @@ def test_agent_factory_registers_skill_tools_for_maintenance_only() -> None:
     runtime = _build_runtime_wrapper(
         MissionRequest(
             prompt="maintain",
-            db_path="/tmp/db.kuzu",
+            memory_db_path="/tmp/db/memory.kuzu",
+            research_meta_db_path="/tmp/db/research_meta.kuzu",
             mission_metadata={"mission_kind": "skill_maintenance", "parent_trace_id": "trace-parent"},
             web_enabled=False,
         ),
@@ -228,7 +248,8 @@ def test_agent_factory_registers_graph_tools_for_research_mission() -> None:
     runtime = _build_runtime_wrapper(
         MissionRequest(
             prompt="research",
-            db_path="/tmp/db.kuzu",
+            memory_db_path="/tmp/db/memory.kuzu",
+            research_meta_db_path="/tmp/db/research_meta.kuzu",
             web_enabled=False,
         ),
         settings,
@@ -268,6 +289,8 @@ def test_agent_factory_registers_graph_tools_for_research_mission() -> None:
     assert "write_graph" in session.tool_names
     assert "inspect_schema" in session.tool_names
     assert "skill_search" in session.tool_names
+    assert "search_research_nodes" in session.tool_names
+    assert "advance_new" in session.tool_names
 
 
 def test_switch_model_tool_schema_matches_allowed_models() -> None:
@@ -281,7 +304,8 @@ def test_switch_model_tool_schema_matches_allowed_models() -> None:
     runtime = _build_runtime_wrapper(
         MissionRequest(
             prompt="research",
-            db_path="/tmp/db.kuzu",
+            memory_db_path="/tmp/db/memory.kuzu",
+            research_meta_db_path="/tmp/db/research_meta.kuzu",
             allowed_models=["openai/gpt-4.1-mini", "anthropic/claude-3.7-sonnet"],
             web_enabled=False,
         ),
@@ -343,7 +367,12 @@ def test_prompt_builders_keep_structured_output_hint_after_refresh() -> None:
         "required": ["answer"],
         "additionalProperties": False,
     }
-    request = MissionRequest(prompt="Return the answer", db_path="/tmp/db.kuzu", output_schema=schema)
+    request = MissionRequest(
+        prompt="Return the answer",
+        memory_db_path="/tmp/db/memory.kuzu",
+        research_meta_db_path="/tmp/db/research_meta.kuzu",
+        output_schema=schema,
+    )
     context = _build_runtime(request)
     schema_json = json.dumps(schema, ensure_ascii=False, indent=2, sort_keys=True)
 
@@ -378,6 +407,10 @@ def test_mission_service_repairs_invalid_json_then_returns_structured_result() -
         trace_store=FakeTraceStore(),
         model_catalog=SimpleNamespace(next_stronger=lambda *args, **kwargs: None),
         memory_manager=SimpleNamespace(preflight=lambda *args, **kwargs: None),
+        research_graph_manager=SimpleNamespace(
+            ensure_schema=lambda db: None,
+            ensure_root=lambda db, prompt, source_trace_id=None: None,
+        ),
     )
 
     prompts: list[str] = []
@@ -397,13 +430,20 @@ def test_mission_service_repairs_invalid_json_then_returns_structured_result() -
             context=context,
             browser=SimpleNamespace(close=fake_close),
             services=service._runtime_builder.services,
+            memory_db=SimpleNamespace(close=lambda: None),
+            research_meta_db=SimpleNamespace(close=lambda: None),
         )
 
     service._runtime_builder.build = build_runtime
     service._run_once = fake_run_once
     service._persist_trace = lambda *args, **kwargs: None
 
-    request = MissionRequest(prompt="Return the answer", db_path="/tmp/db.kuzu", output_schema=schema)
+    request = MissionRequest(
+        prompt="Return the answer",
+        memory_db_path="/tmp/db/memory.kuzu",
+        research_meta_db_path="/tmp/db/research_meta.kuzu",
+        output_schema=schema,
+    )
     result = asyncio.run(service.run(request))
 
     assert result.status.value == "completed"

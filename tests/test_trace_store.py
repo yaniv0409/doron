@@ -14,7 +14,11 @@ def test_trace_store_round_trip_preserves_tool_calls_and_web_artifacts(tmp_path:
     )
     trace = ExecutionTrace(
         trace_id="trace-123",
-        request=MissionRequest(prompt="hello", db_path="/tmp/db.kuzu"),
+        request=MissionRequest(
+            prompt="hello",
+            memory_db_path="/tmp/db/memory.kuzu",
+            research_meta_db_path="/tmp/db/research_meta.kuzu",
+        ),
         model_sequence=["openai/gpt-4.1-mini"],
         tool_calls=[
             ToolCallRecord(

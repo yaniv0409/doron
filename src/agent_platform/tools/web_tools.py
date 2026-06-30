@@ -254,16 +254,6 @@ async def get_page_text(runtime: MissionRuntime, reason: str) -> ToolResult:
 
 
 async def web_search(runtime: MissionRuntime, query: str, reason: str) -> ToolResult:
-    if DDGS is None:
-        result = error_result(
-            "web_search",
-            "duckduckgo_search_unavailable",
-            "DuckDuckGo search support is not installed",
-            'Install the `ddgs` package or the `duckduckgo` optional group.',
-        )
-        _record_web_search_failure(runtime, query, reason, result)
-        return result
-
     arguments = {"query": query, "reason": reason}
     runtime.context.tool_summaries.append(f"web_search | reason: {reason}")
     emit_runtime_event(
@@ -276,10 +266,21 @@ async def web_search(runtime: MissionRuntime, query: str, reason: str) -> ToolRe
         },
     )
     try:
-        raw_results = await asyncio.to_thread(_duckduckgo_search, query, _DEFAULT_WEB_SEARCH_RESULT_LIMIT)
+        # Keep DuckDuckGo search synchronous here to avoid leaving asyncio.run() waiting
+        # on executor teardown in environments where the worker thread does not exit promptly.
+        raw_results = _duckduckgo_search(query, _DEFAULT_WEB_SEARCH_RESULT_LIMIT)
     except Exception as exc:  # pragma: no cover
         if _is_control_flow_exception(exc):
             raise
+        if isinstance(exc, RuntimeError) and "ddgs" in str(exc).lower():
+            result = error_result(
+                "web_search",
+                "duckduckgo_search_unavailable",
+                str(exc),
+                "Install the `ddgs` package or the `duckduckgo` optional group.",
+            )
+            _record_web_search_failure(runtime, query, reason, result)
+            return result
         result = error_result(
             "web_search",
             "web_search_error",
@@ -493,18 +494,22 @@ def _record_browser_text_failure(runtime: MissionRuntime, reason: str, result: T
 
 
 def _record_web_search_failure(runtime: MissionRuntime, query: str, reason: str, result: ToolResult) -> None:
+    summary = result.error_message or "web search failed"
+    if result.error_type:
+        summary = f"{result.error_type}: {summary}"
     runtime.context.tool_calls.append(
         build_tool_call(
             "web_search",
             {"query": query, "reason": reason},
-            result_summary=result.error_message or "web search failed",
+            result_summary=summary,
             reason=reason,
             ok=False,
             error_type=result.error_type,
             error_message=result.error_message,
         )
     )
-    runtime.context.tool_summaries.append(f"web_search failed | reason: {reason}")
+    failure_summary = summary
+    runtime.context.tool_summaries.append(f"web_search failed ({failure_summary}) | reason: {reason}")
 
 
 def _normalize_search_snippet(text: str) -> str:
@@ -513,6 +518,8 @@ def _normalize_search_snippet(text: str) -> str:
 
 
 def _duckduckgo_search(query: str, max_results: int | None) -> list[dict[str, Any]]:
+    if DDGS is None:
+        raise RuntimeError("DuckDuckGo search support is not installed; install the ddgs package.")
     client = DDGS()
     return client.text(query, max_results=max_results)
 

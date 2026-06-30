@@ -14,7 +14,11 @@ from agent_platform.infrastructure.trace_store import TraceStore
 
 
 def _build_parent_trace(trace_id: str = "parent-trace") -> ExecutionTrace:
-    request = MissionRequest(prompt="research nVent", db_path="/tmp/demo.kuzu")
+    request = MissionRequest(
+        prompt="research nVent",
+        memory_db_path="/tmp/demo/memory.kuzu",
+        research_meta_db_path="/tmp/demo/research_meta.kuzu",
+    )
     return ExecutionTrace(
         trace_id=trace_id,
         request=request,
@@ -40,7 +44,8 @@ def test_maintenance_job_store_writes_queue_artifacts(tmp_path: Path) -> None:
     parent_trace = _build_parent_trace()
     request = MissionRequest(
         prompt="maintain skills",
-        db_path="/tmp/demo.kuzu",
+        memory_db_path="/tmp/demo/memory.kuzu",
+        research_meta_db_path="/tmp/demo/research_meta.kuzu",
         mission_metadata={"mission_kind": "skill_maintenance", "parent_trace_id": parent_trace.trace_id},
         web_enabled=False,
     )
@@ -65,7 +70,8 @@ def test_maintenance_runner_marks_cancelled_jobs(tmp_path: Path) -> None:
         gate = asyncio.Event()
         request = MissionRequest(
             prompt="maintain skills",
-            db_path="/tmp/demo.kuzu",
+            memory_db_path="/tmp/demo/memory.kuzu",
+            research_meta_db_path="/tmp/demo/research_meta.kuzu",
             mission_metadata={"mission_kind": "skill_maintenance", "parent_trace_id": parent_trace.trace_id},
             web_enabled=False,
         )

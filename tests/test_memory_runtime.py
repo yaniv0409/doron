@@ -21,11 +21,16 @@ def _build_fake_runtime(request: MissionRequest, settings: AppSettings, *, memor
     )
     return SimpleNamespace(
         context=context,
-        db=SimpleNamespace(),
+        memory_db=SimpleNamespace(),
+        research_meta_db=SimpleNamespace(),
         browser=SimpleNamespace(close=lambda: asyncio.sleep(0)),
         services=SimpleNamespace(
             settings=settings,
             memory_manager=memory_manager,
+            research_graph_manager=SimpleNamespace(
+                ensure_schema=lambda db: None,
+                ensure_root=lambda db, prompt, source_trace_id=None: None,
+            ),
             trace_store=SimpleNamespace(
                 write_request_snapshot=lambda *args, **kwargs: None,
                 write_progress=lambda *args, **kwargs: None,
@@ -73,7 +78,15 @@ def test_main_prompt_includes_preflight_skill_context() -> None:
     )
     service._maybe_schedule_skill_maintenance = lambda trace: None
 
-    result = asyncio.run(service.run(MissionRequest(prompt="research nVent", db_path="/tmp/demo.kuzu")))
+    result = asyncio.run(
+        service.run(
+            MissionRequest(
+                prompt="research nVent",
+                memory_db_path="/tmp/demo/memory.kuzu",
+                research_meta_db_path="/tmp/demo/research_meta.kuzu",
+            )
+        )
+    )
 
     assert result.status.value == "completed"
     assert "Learned skill context" in captured_prompts[0]
@@ -104,7 +117,13 @@ def test_mission_service_schedules_background_skill_maintenance(tmp_path: Path) 
         service.attach_maintenance_runner(SimpleNamespace(enqueue=lambda trace: scheduled.append(trace)))
         service._runtime_builder.build = build_runtime
         service._run_once = fake_run_once
-        await service.run(MissionRequest(prompt="research", db_path="/tmp/demo.kuzu"))
+        await service.run(
+            MissionRequest(
+                prompt="research",
+                memory_db_path="/tmp/demo/memory.kuzu",
+                research_meta_db_path="/tmp/demo/research_meta.kuzu",
+            )
+        )
 
         assert len(scheduled) == 1
 
@@ -150,7 +169,8 @@ def test_maintenance_run_writes_trace_skeleton(tmp_path: Path) -> None:
 
         request = MissionRequest(
             prompt="maintain skills",
-            db_path="/tmp/demo.kuzu",
+            memory_db_path="/tmp/demo/memory.kuzu",
+            research_meta_db_path="/tmp/demo/research_meta.kuzu",
             mission_metadata={"mission_kind": "skill_maintenance", "parent_trace_id": "parent-1"},
             web_enabled=False,
         )
@@ -188,3 +208,5 @@ def test_skill_maintenance_prompt_mentions_attachment_not_trace_head(tmp_path: P
     assert "0123456789ABCDEFGH" not in prompt
     assert "harden Doron's skills" in prompt
     assert "Use graph read tools to inspect existing graph state" in prompt
+    assert "disconnected nodes across the graph" in prompt
+    assert "LLM garbage" in prompt

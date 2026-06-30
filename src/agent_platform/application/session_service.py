@@ -482,7 +482,11 @@ class SessionService:
             output_schema=output_schema,
             preferred_model=request.preferred_model if request.preferred_model is not None else session.preferred_model,
             allowed_models=request.allowed_models if request.allowed_models is not None else session.allowed_models,
-            mission_metadata={"session_id": session.session_id, "session_name": session.name},
+            mission_metadata={
+                "session_id": session.session_id,
+                "session_name": session.name,
+                "research_root_prompt": self._root_prompt(session, request.message.strip()),
+            },
             web_enabled=session.web_enabled if request.web_enabled is None else request.web_enabled,
             db_mutation_enabled=(
                 session.db_mutation_enabled if request.db_mutation_enabled is None else request.db_mutation_enabled
@@ -685,6 +689,12 @@ class SessionService:
             return fallback
         for turn in reversed(context_state.active_turns):
             if turn.message_id == current_message_id:
+                return turn.content
+        return fallback
+
+    def _root_prompt(self, session: ResearchSession, fallback: str) -> str:
+        for turn in session.turns:
+            if turn.role == "user":
                 return turn.content
         return fallback
 
