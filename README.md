@@ -11,8 +11,9 @@ Doron is a generic agent scaffold built around:
 Research workspace features:
 
 - named durable research sessions stored as JSON under `sessions/`
-- shared or dedicated graph databases under `dbs/`
-- shared DB session groups so multiple sessions can work against the same graph with separate context
+- shared or dedicated research storage directories under `dbs/`
+- each storage directory contains `memory.kuzu` and `research_meta.kuzu`
+- shared DB session groups so multiple sessions can work against the same storage directory with separate context
 - live per-request SSE streaming for mission progress and tool activity
 - session-scoped web browsing tool limits with per-message overrides
 - session stop controls for soft wrap-up requests and hard session cancellation
@@ -82,7 +83,8 @@ uvicorn agent_platform.api.app:create_app --factory --reload
 Send:
 
 - `prompt`
-- `db_path`
+- `memory_db_path`
+- `research_meta_db_path`
 - optional `output_schema`
 - optional model controls
 - optional `stream=true` to receive SSE events instead of blocking JSON
@@ -102,8 +104,8 @@ Stream mode emits live mission progress, tool events, and the final result over 
 
 - create or resume a named session
 - returns a stable `session_id`
-- uses `dbs/shared.kuzu` by default
-- creates a dedicated `dbs/<session-name>-<id>.kuzu` database when requested
+- uses `dbs/shared/` by default
+- creates a dedicated `dbs/<session-name>-<id>/` directory when requested
 - accepts optional `session_group_id` to create or resume a session inside an existing shared-DB group
 
 `GET /sessions`
@@ -150,7 +152,7 @@ Stream mode emits live mission progress, tool events, and the final result over 
 
 `GET /sessions/{session_id}/graph`
 
-- graph snapshot for the session database
+- graph snapshot for the session database target
 - nodes and edges include their metadata for click inspection in the UI
 
 `POST /db/contents`
@@ -200,11 +202,11 @@ Optional overrides:
 Run a terminal chat that talks to the API:
 
 ```bash
-python -m agent_platform.cli.chat --db-path /absolute/path/to/database.kuzu --api-url http://127.0.0.1:8000
+python -m agent_platform.cli.chat --db-dir /absolute/path/to/database-directory --api-url http://127.0.0.1:8000
 ```
 
 If you want the terminal to start a local API server automatically, add `--start-server`.
-If the database path does not exist yet, the platform will initialize a new Kuzu database there on first use.
+If the database directory does not exist yet, the platform will initialize both Kuzu databases there on first use.
 Prompts are multiline by default. Type lines freely and submit with a blank line.
 If you pass `--prompt-file`, the CLI loads that file as the first mission prompt before it drops into interactive mode.
 

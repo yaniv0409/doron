@@ -37,7 +37,7 @@ class TraceSettings(BaseModel):
 class SessionSettings(BaseModel):
     directory: Path = Path("sessions")
     db_directory: Path = Path("dbs")
-    shared_db_path: Path = Path("dbs/shared.kuzu")
+    shared_db_dir: Path = Path("dbs/shared")
     history_turn_limit: int = 12
     active_context_turn_limit: int = 8
     summary_tool_limit: int = 12

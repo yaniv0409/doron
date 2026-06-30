@@ -55,7 +55,7 @@ def test_graph_snapshot_service_scans_all_tables(monkeypatch) -> None:
     monkeypatch.setattr(snapshot_service, "KuzuGateway", FakeGateway)
     service = snapshot_service.GraphSnapshotService(settings=type("Settings", (), {"graph_node_limit": 10, "graph_edge_limit": 10})())
 
-    response = service.build_snapshot("session-1", "/tmp/demo.kuzu")
+    response = service.build_snapshot("session-1", "memory", "/tmp/demo.kuzu")
 
     assert response.node_count == 4
     assert response.edge_count == 2
@@ -81,7 +81,7 @@ def test_graph_snapshot_service_respects_limits(monkeypatch) -> None:
     monkeypatch.setattr(snapshot_service, "KuzuGateway", FakeGateway)
     service = snapshot_service.GraphSnapshotService(settings=type("Settings", (), {"graph_node_limit": 3, "graph_edge_limit": 1})())
 
-    response = service.build_snapshot("session-1", "/tmp/demo.kuzu")
+    response = service.build_snapshot("session-1", "memory", "/tmp/demo.kuzu")
 
     assert response.node_count == 3
     assert response.edge_count == 1

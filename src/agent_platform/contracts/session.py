@@ -36,7 +36,9 @@ class SessionSummaryResponse(BaseModel):
     session_group_id: str | None = None
     session_group_name: str | None = None
     uses_dedicated_db: bool
-    db_path: str
+    db_dir: str
+    memory_db_path: str
+    research_meta_db_path: str
     web_tool_call_limit: int | None = None
     updated_at: str
     created_at: str
@@ -143,7 +145,8 @@ class GraphEdgeResponse(BaseModel):
 
 class SessionGraphResponse(BaseModel):
     session_id: str
-    db_path: str
+    target: str
+    graph_db_path: str
     generated_at: str
     node_count: int
     edge_count: int

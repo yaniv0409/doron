@@ -8,7 +8,8 @@ from agent_platform.domain.models import CompletionMetadata
 
 class MissionRunRequest(BaseModel):
     prompt: str = Field(min_length=1)
-    db_path: str = Field(min_length=1)
+    memory_db_path: str = Field(min_length=1)
+    research_meta_db_path: str = Field(min_length=1)
     output_schema: dict[str, Any] | None = None
     preferred_model: str | None = None
     allowed_models: list[str] | None = None

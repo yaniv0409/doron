@@ -17,7 +17,7 @@ async def read_graph(
     parameters: dict[str, Any] | None = None,
 ) -> ToolResult:
     try:
-        rows = runtime.db.execute(query, parameters)
+        rows = runtime.memory_db.execute(query, parameters)
     except DatabaseError as exc:
         result = error_result(
             "read_graph",
@@ -75,11 +75,11 @@ async def write_graph(
     if runtime.context.db_checkpoint_path is None:
         checkpoint = runtime.services.trace_store.create_checkpoint(
             runtime.context.trace_id,
-            runtime.context.mission_request.db_path,
+            runtime.context.mission_request.memory_db_path,
         )
         runtime.context.db_checkpoint_path = str(checkpoint)
     try:
-        rows = runtime.db.execute(query, parameters)
+        rows = runtime.memory_db.execute(query, parameters)
     except DatabaseError as exc:
         result = error_result(
             "write_graph",
@@ -115,7 +115,7 @@ async def write_graph(
         )
         return result
     try:
-        runtime.db.sync()
+        runtime.memory_db.sync()
     except DatabaseError as exc:
         result = error_result(
             "write_graph",
@@ -173,7 +173,7 @@ async def write_graph(
 
 async def inspect_schema(runtime: MissionRuntime, reason: str) -> ToolResult:
     try:
-        schema = runtime.db.get_schema()
+        schema = runtime.memory_db.get_schema()
     except DatabaseError as exc:
         result = error_result(
             "inspect_schema",

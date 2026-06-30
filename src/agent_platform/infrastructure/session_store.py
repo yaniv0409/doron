@@ -14,7 +14,7 @@ class SessionStore:
         self._settings = settings
         self._settings.directory.mkdir(parents=True, exist_ok=True)
         self._settings.db_directory.mkdir(parents=True, exist_ok=True)
-        self._settings.shared_db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._settings.shared_db_dir.mkdir(parents=True, exist_ok=True)
         self._adapter = TypeAdapter(ResearchSession)
         self._summary_adapter = TypeAdapter(ResearchSessionSummary)
 
@@ -97,7 +97,9 @@ def _build_summary(session: ResearchSession) -> ResearchSessionSummary:
         session_group_id=session.session_group_id,
         session_group_name=session.session_group_name,
         uses_dedicated_db=session.uses_dedicated_db,
-        db_path=session.db_path,
+        db_dir=session.db_dir,
+        memory_db_path=session.memory_db_path,
+        research_meta_db_path=session.research_meta_db_path,
         web_tool_call_limit=session.web_tool_call_limit,
         created_at=session.created_at,
         updated_at=session.updated_at,

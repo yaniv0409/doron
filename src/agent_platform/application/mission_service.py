@@ -209,7 +209,9 @@ class MissionService:
             with suppress(Exception):
                 await runtime.browser.close()
             with suppress(Exception):
-                runtime.db.close()
+                runtime.memory_db.close()
+            with suppress(Exception):
+                runtime.research_meta_db.close()
 
     async def _run_once(self, runtime: MissionRuntime, prompt: str) -> tuple[Any, CompletionMetadata | None]:
         session = self._agent_factory.create(runtime)
@@ -554,7 +556,7 @@ class MissionService:
         metadata = runtime.context.mission_request.mission_metadata or {}
         if metadata.get("mission_kind") == "skill_maintenance":
             runtime.context.memory_tool_call_budget = runtime.services.settings.memory.maintenance_tool_budget
-            runtime.services.memory_manager.ensure_schema(runtime.db)
+            runtime.services.memory_manager.ensure_schema(runtime.research_meta_db)
 
     def _write_trace_skeleton(self, runtime: MissionRuntime, request_payload: dict[str, Any]) -> None:
         metadata = runtime.context.mission_request.mission_metadata or {}
@@ -588,7 +590,7 @@ class MissionService:
             if isinstance(parent_trace_id, str) and parent_trace_id:
                 trace_text = runtime.services.trace_store.read_raw_trace_text(parent_trace_id)
                 results = await runtime.services.memory_manager.related_for_maintenance(
-                    runtime.db,
+                    runtime.research_meta_db,
                     trace_text,
                 )
                 runtime.context.memory_retrievals.append(
@@ -622,7 +624,8 @@ class MissionService:
         )
         return MissionRequest(
             prompt=self._build_skill_maintenance_prompt(trace),
-            db_path=trace.request.db_path,
+            memory_db_path=trace.request.memory_db_path,
+            research_meta_db_path=trace.request.research_meta_db_path,
             preferred_model=strongest.name,
             allowed_models=[item.name for item in self._runtime_builder.services.model_catalog.resolve_allowed(trace.request)],
             mission_metadata={

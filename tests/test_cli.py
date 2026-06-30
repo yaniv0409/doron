@@ -16,7 +16,7 @@ def test_parse_allowed_models() -> None:
 
 def test_build_defaults_uses_namespace_values() -> None:
     args = Namespace(
-        db_path="/tmp/demo.kuzu",
+        db_dir="/tmp/demo",
         api_url="http://127.0.0.1:8000",
         start_server=True,
         server_ready_timeout_seconds=30,
@@ -27,7 +27,9 @@ def test_build_defaults_uses_namespace_values() -> None:
         db_mutation_enabled=True,
     )
     defaults = build_defaults(args)
-    assert defaults.db_path == "/tmp/demo.kuzu"
+    assert defaults.db_dir == "/tmp/demo"
+    assert defaults.memory_db_path == "/tmp/demo/memory.kuzu"
+    assert defaults.research_meta_db_path == "/tmp/demo/research_meta.kuzu"
     assert defaults.api_url == "http://127.0.0.1:8000"
     assert defaults.start_server is True
     assert defaults.server_ready_timeout_seconds == 30
@@ -37,7 +39,7 @@ def test_build_defaults_uses_namespace_values() -> None:
 
 
 def test_parse_args_supports_prompt_file() -> None:
-    args = parse_args(["--db-path", "/tmp/demo.kuzu", "--prompt-file", "/tmp/prompt.md"])
+    args = parse_args(["--db-dir", "/tmp/demo", "--prompt-file", "/tmp/prompt.md"])
 
     assert args.prompt_file == "/tmp/prompt.md"
 

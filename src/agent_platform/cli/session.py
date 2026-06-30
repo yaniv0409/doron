@@ -11,7 +11,9 @@ from agent_platform.contracts.api import MissionRunRequest, MissionStreamEvent
 
 @dataclass(slots=True)
 class ChatDefaults:
-    db_path: str
+    db_dir: str
+    memory_db_path: str
+    research_meta_db_path: str
     api_url: str = "http://127.0.0.1:8000"
     preferred_model: str | None = None
     allowed_models: list[str] | None = None
@@ -45,7 +47,8 @@ class ChatSession:
     def _build_request(self, prompt: str) -> MissionRunRequest:
         return MissionRunRequest(
             prompt=prompt,
-            db_path=self._defaults.db_path,
+            memory_db_path=self._defaults.memory_db_path,
+            research_meta_db_path=self._defaults.research_meta_db_path,
             output_schema=self._defaults.output_schema,
             preferred_model=self._defaults.preferred_model,
             allowed_models=self._defaults.allowed_models,
@@ -60,3 +63,8 @@ def load_output_schema(path: str | None) -> dict[str, Any] | None:
         return None
     payload = Path(path).read_text(encoding="utf-8")
     return json.loads(payload)
+
+
+def resolve_db_layout(db_dir: str) -> tuple[str, str]:
+    root = Path(db_dir)
+    return str(root / "memory.kuzu"), str(root / "research_meta.kuzu")

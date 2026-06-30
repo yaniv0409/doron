@@ -18,7 +18,7 @@ async def skill_search(
     if blocked is not None:
         return blocked
     results = await runtime.services.memory_manager.search(
-        runtime.db,
+        runtime.research_meta_db,
         query,
         kinds=["skill"],
         limit=runtime.services.settings.memory.preflight_limit,
@@ -43,7 +43,7 @@ async def skill_read(runtime: MissionRuntime, ids: list[str], reason: str) -> To
     blocked = _reserve_skill_tool_call(runtime, "skill_read", reason, {"ids": ids})
     if blocked is not None:
         return blocked
-    results = runtime.services.memory_manager.read(runtime.db, ids)
+    results = runtime.services.memory_manager.read(runtime.research_meta_db, ids)
     runtime.context.tool_calls.append(
         build_tool_call(
             "skill_read",
@@ -61,7 +61,7 @@ async def skill_write(runtime: MissionRuntime, entries: list[dict[str, Any]], re
     if blocked is not None:
         return blocked
     skill_entries = [_force_skill_entry(entry) for entry in entries]
-    mutations = await runtime.services.memory_manager.write_entries(runtime.db, skill_entries, reason=reason)
+    mutations = await runtime.services.memory_manager.write_entries(runtime.research_meta_db, skill_entries, reason=reason)
     runtime.context.memory_mutations.extend(mutations)
     runtime.context.tool_calls.append(
         build_tool_call(
@@ -80,7 +80,7 @@ async def skill_update(runtime: MissionRuntime, entries: list[dict[str, Any]], r
     if blocked is not None:
         return blocked
     skill_entries = [_force_skill_entry(entry) for entry in entries]
-    mutations = await runtime.services.memory_manager.update_entries(runtime.db, skill_entries, reason=reason)
+    mutations = await runtime.services.memory_manager.update_entries(runtime.research_meta_db, skill_entries, reason=reason)
     runtime.context.memory_mutations.extend(mutations)
     runtime.context.tool_calls.append(
         build_tool_call(
@@ -104,7 +104,7 @@ async def skill_deprecate(
     if blocked is not None:
         return blocked
     mutations = runtime.services.memory_manager.deprecate_entries(
-        runtime.db,
+        runtime.research_meta_db,
         ids,
         reason=reason,
         replacement_id=replacement_id,

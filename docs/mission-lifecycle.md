@@ -5,12 +5,13 @@
 The API receives:
 
 - prompt
-- database path
+- free-form memory database path
+- research metadata database path
 - optional output schema
 - optional model preferences
 - feature flags for web and database mutation
 
-If the database path does not exist, the runtime initializes a new Kuzu database there before the mission runs.
+If the database paths do not exist, the runtime initializes the Kuzu databases before the mission runs.
 
 ## Execution
 
@@ -31,7 +32,7 @@ Browser navigation uses a dedicated 15-second timeout by default. The mission-sc
 Every tool call must include a short reason, and browser tools are capped at 20 calls per mission by default. That reason and the remaining web budget are surfaced in tool results and handoff prompts so the model keeps its direction and can stop browsing before it is rate limited.
 Session stop controls are persisted on the session record. A soft stop injects wrap-up instructions into the next session prompt until the session is resumed, and a hard stop closes the session and cancels any in-flight run.
 Session steering is also session-scoped. A steer appends a visible steer turn, cancels the in-flight mission, rebuilds the prompt with the original mission plus ordered steering updates, and restarts the same run using the context accumulated so far.
-Session grouping is metadata on top of DB selection. Multiple sessions can point at the same `db_path` and share a `session_group_id` while keeping separate conversation state; forking can optionally clone the source context snapshot into the new session.
+Session grouping is metadata on top of DB selection. Multiple sessions can point at the same storage directory and share a `session_group_id` while keeping separate conversation state; forking can optionally clone the source context snapshot into the new session.
 Skill maintenance is durable and repo-owned. A main mission that finishes with maintenance enabled writes a maintenance job record under `traces/maintenance-jobs/`, writes an initial maintenance trace skeleton immediately, and lets the `MaintenanceRunner` execute the follow-up in the background. On startup the runner reloads pending jobs so maintenance does not depend on the request lifecycle that triggered the mission.
 When the CLI auto-starts the local API server, `MissionApiClient.close()` no longer tears that server down. The server stays up so background maintenance can finish; explicit server shutdown is a separate action.
 When the API is called with `stream=true`, the same mission emits live SSE events for mission progress, tool starts/completions, steer/restart transitions, and the final result.

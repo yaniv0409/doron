@@ -67,7 +67,9 @@ def format_config_summary(defaults: Any) -> str:
     schema = "yes" if defaults.output_schema else "no"
     return "\n".join(
         [
-            f"db_path={defaults.db_path}",
+            f"db_dir={defaults.db_dir}",
+            f"memory_db_path={defaults.memory_db_path}",
+            f"research_meta_db_path={defaults.research_meta_db_path}",
             f"preferred_model={defaults.preferred_model or 'default'}",
             f"allowed_models={allowed}",
             f"web_enabled={defaults.web_enabled}",

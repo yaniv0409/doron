@@ -38,6 +38,7 @@ export default function App() {
   const [sessions, setSessions] = useState([]);
   const [activeSession, setActiveSession] = useState(null);
   const [graph, setGraph] = useState(EMPTY_GRAPH);
+  const [graphTarget, setGraphTarget] = useState("memory");
   const [inspectedItem, setInspectedItem] = useState(null);
   const [activity, setActivity] = useState([]);
   const [isSending, setIsSending] = useState(false);
@@ -77,8 +78,8 @@ export default function App() {
     setSessions(payload);
   }, []);
 
-  const refreshGraph = useCallback(async (sessionId, token = loadTokenRef.current) => {
-    const response = await fetch(`${API_BASE}/sessions/${sessionId}/graph`);
+  const refreshGraph = useCallback(async (sessionId, token = loadTokenRef.current, target = graphTarget) => {
+    const response = await fetch(`${API_BASE}/sessions/${sessionId}/graph/${target}`);
     if (!response.ok) {
       return;
     }
@@ -90,7 +91,14 @@ export default function App() {
       return;
     }
     setGraph(payload);
-  }, []);
+  }, [graphTarget]);
+
+  useEffect(() => {
+    if (!activeSession?.session_id) {
+      return;
+    }
+    void refreshGraph(activeSession.session_id, loadTokenRef.current, graphTarget);
+  }, [activeSession?.session_id, graphTarget, refreshGraph]);
 
   const loadSession = useCallback(
     async (sessionId, { turnLimit = INITIAL_TURN_LIMIT } = {}) => {
@@ -114,10 +122,10 @@ export default function App() {
 
       currentSessionIdRef.current = sessionId;
       setActiveSession(payload);
-      void refreshGraph(sessionId, token);
+      void refreshGraph(sessionId, token, graphTarget);
       return true;
     },
-    [refreshGraph],
+    [graphTarget, refreshGraph],
   );
 
   const openSession = useCallback(
@@ -403,8 +411,10 @@ export default function App() {
 
         <GraphColumn
           graph={graph}
+          graphTarget={graphTarget}
           graphSummary={graphSummary}
           inspectedItem={inspectedItem}
+          onGraphTargetChange={setGraphTarget}
           onInspect={setInspectedItem}
         />
       </main>
@@ -550,7 +560,7 @@ function SessionSidebar({ activeSessionId, onForkSession, onOpenSession, onSelec
               <div className="session-group" key={entry.group.session_group_id}>
                 <div className="session-group-header">
                   <strong>{entry.group.session_group_name}</strong>
-                  <small>{entry.group.db_path}</small>
+                  <small>{entry.group.db_dir}</small>
                 </div>
                 <div className="session-group-items">
                   {entry.sessions.map((session) => (
@@ -690,7 +700,7 @@ function ChatColumn({
       <div className="chat-header card">
         <div>
           <h2>{activeSession?.name || "No session selected"}</h2>
-          <p>{activeSession?.db_path || "Open a session to begin."}</p>
+          <p>{activeSession?.db_dir || "Open a session to begin."}</p>
         </div>
         {activeSession ? (
           <SessionControls
@@ -878,7 +888,7 @@ function Composer({ activeSession, isSending, onSendMessage }) {
   );
 }
 
-function GraphColumn({ graph, graphSummary, inspectedItem, onInspect }) {
+function GraphColumn({ graph, graphSummary, graphTarget, inspectedItem, onGraphTargetChange, onInspect }) {
   const [graphSearchQuery, setGraphSearchQuery] = useState("");
   const deferredGraphSearchQuery = useDeferredValue(graphSearchQuery);
   const filteredGraph = useMemo(
@@ -905,6 +915,13 @@ function GraphColumn({ graph, graphSummary, inspectedItem, onInspect }) {
             onChange={(event) => setGraphSearchQuery(event.target.value)}
             placeholder="Search nodes, edges, ids, properties..."
           />
+        </label>
+        <label className="graph-search">
+          <span>Graph target</span>
+          <select value={graphTarget} onChange={(event) => onGraphTargetChange(event.target.value)}>
+            <option value="memory">Free-form memory</option>
+            <option value="research_meta">Research metadata</option>
+          </select>
         </label>
       </div>
       <div className="card graph-wrap">
@@ -1156,7 +1173,7 @@ function buildSessionGroups(sessions) {
       groups.set(session.session_group_id, {
         session_group_id: session.session_group_id,
         session_group_name: session.session_group_name || "Session group",
-        db_path: session.db_path,
+        db_dir: session.db_dir,
       });
     }
   }
@@ -1177,7 +1194,7 @@ function buildSidebarEntries(sessions) {
         group: {
           session_group_id: session.session_group_id,
           session_group_name: session.session_group_name || "Session group",
-          db_path: session.db_path,
+          db_dir: session.db_dir,
         },
         sessions: [],
       });

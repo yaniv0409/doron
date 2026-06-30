@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Callable
 
 from agent_platform.cli.formatters import format_final_stream_response, format_stream_event
-from agent_platform.cli.session import ChatDefaults, ChatSession, load_output_schema
+from agent_platform.cli.session import ChatDefaults, ChatSession, load_output_schema, resolve_db_layout
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -68,7 +68,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Terminal chat for agent-platform.")
-    parser.add_argument("--db-path")
+    parser.add_argument("--db-dir")
     parser.add_argument("--api-url", default="http://127.0.0.1:8000")
     parser.add_argument("--start-server", action="store_true", default=False)
     parser.add_argument("--server-ready-timeout-seconds", type=int, default=20)
@@ -84,11 +84,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def build_defaults(args: argparse.Namespace) -> ChatDefaults:
-    db_path = args.db_path or input("Database path: ").strip()
-    print(f"Using database path: {db_path}")
+    db_dir = args.db_dir or input("Database directory: ").strip()
+    memory_db_path, research_meta_db_path = resolve_db_layout(db_dir)
+    print(f"Using database directory: {db_dir}")
     allowed_models = parse_allowed_models(args.allowed_models)
     return ChatDefaults(
-        db_path=db_path,
+        db_dir=db_dir,
+        memory_db_path=memory_db_path,
+        research_meta_db_path=research_meta_db_path,
         api_url=args.api_url,
         preferred_model=args.preferred_model,
         allowed_models=allowed_models,

@@ -38,7 +38,11 @@ class FailingDocsRepository:
 
 
 def build_runtime() -> SimpleNamespace:
-    request = MissionRequest(prompt="what are elon's companies?", db_path="/tmp/demo.kuzu")
+    request = MissionRequest(
+        prompt="what are elon's companies?",
+        memory_db_path="/tmp/demo/memory.kuzu",
+        research_meta_db_path="/tmp/demo/research_meta.kuzu",
+    )
     context = RuntimeContext(
         trace_id="trace-1",
         mission_request=request,
@@ -55,7 +59,7 @@ def build_runtime() -> SimpleNamespace:
         docs_repository=FailingDocsRepository(),
         trace_store=SimpleNamespace(create_checkpoint=lambda *_args, **_kwargs: "/tmp/checkpoint"),
     )
-    return SimpleNamespace(context=context, db=FailingDb(), services=services)
+    return SimpleNamespace(context=context, memory_db=FailingDb(), research_meta_db=FailingDb(), services=services)
 
 
 def test_read_graph_returns_recoverable_error_result() -> None:
@@ -82,7 +86,7 @@ def test_inspect_schema_returns_recoverable_error_result() -> None:
 
 def test_write_graph_syncs_after_successful_write() -> None:
     runtime = build_runtime()
-    runtime.db = WritableDb()
+    runtime.memory_db = WritableDb()
 
     result = asyncio.run(
         write_graph(
@@ -93,7 +97,7 @@ def test_write_graph_syncs_after_successful_write() -> None:
     )
 
     assert result.ok is True
-    assert runtime.db.sync_calls == 1
+    assert runtime.memory_db.sync_calls == 1
     assert runtime.context.db_mutations[0].query == "CREATE (c:Company {ticker: 'TEST'})"
 
 
@@ -113,7 +117,7 @@ def test_read_graph_returns_runtime_error_result() -> None:
             raise RuntimeError("database driver exploded")
 
     runtime = build_runtime()
-    runtime.db = RuntimeFailingDb()
+    runtime.memory_db = RuntimeFailingDb()
 
     result = asyncio.run(read_graph(runtime, "MATCH (c:Company) RETURN c", "find Elon-related companies"))
 

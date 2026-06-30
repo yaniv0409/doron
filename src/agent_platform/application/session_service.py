@@ -89,12 +89,14 @@ class SessionService:
 
         group_session = self._resolve_group_session(request.session_group_id)
         session_id = str(uuid.uuid4())
-        db_path = group_session.db_path if group_session is not None else self._resolve_db_path(
+        db_dir = group_session.db_dir if group_session is not None else self._resolve_db_dir(
             request.name,
             session_id,
             request.use_dedicated_db,
         )
-        _ensure_db_path(db_path)
+        memory_db_path = _memory_db_path(db_dir)
+        research_meta_db_path = _research_meta_db_path(db_dir)
+        _ensure_db_layout(db_dir)
         now = utc_now()
         session = ResearchSession(
             session_id=session_id,
@@ -103,7 +105,9 @@ class SessionService:
             session_group_id=group_session.session_group_id if group_session is not None else None,
             session_group_name=group_session.session_group_name if group_session is not None else None,
             uses_dedicated_db=group_session.uses_dedicated_db if group_session is not None else request.use_dedicated_db,
-            db_path=db_path,
+            db_dir=db_dir,
+            memory_db_path=memory_db_path,
+            research_meta_db_path=research_meta_db_path,
             preferred_model=request.preferred_model,
             allowed_models=request.allowed_models,
             output_schema=request.output_schema,
@@ -143,7 +147,9 @@ class SessionService:
             session_group_id=group_id,
             session_group_name=group_name,
             uses_dedicated_db=source.uses_dedicated_db,
-            db_path=source.db_path,
+            db_dir=source.db_dir,
+            memory_db_path=source.memory_db_path,
+            research_meta_db_path=source.research_meta_db_path,
             preferred_model=source.preferred_model if request.inherit_model_settings else None,
             allowed_models=list(source.allowed_models) if request.inherit_model_settings and source.allowed_models else None,
             output_schema=dict(source.output_schema) if request.inherit_output_schema and source.output_schema else None,
@@ -471,7 +477,8 @@ class SessionService:
         output_schema = request.output_schema if request.output_schema is not None else session.output_schema
         return MissionRequest(
             prompt=self._build_prompt(session, context_state, request.message.strip(), output_schema=output_schema),
-            db_path=session.db_path,
+            memory_db_path=session.memory_db_path,
+            research_meta_db_path=session.research_meta_db_path,
             output_schema=output_schema,
             preferred_model=request.preferred_model if request.preferred_model is not None else session.preferred_model,
             allowed_models=request.allowed_models if request.allowed_models is not None else session.allowed_models,
@@ -605,7 +612,8 @@ class SessionService:
         allowed_models = self._model_catalog.resolve_allowed(mission_request)
         compression_request = MissionRequest(
             prompt=self._current_mission_text(context_state, mission_request.prompt),
-            db_path=mission_request.db_path,
+            memory_db_path=mission_request.memory_db_path,
+            research_meta_db_path=mission_request.research_meta_db_path,
             output_schema=mission_request.output_schema,
             preferred_model=model.name,
             allowed_models=[item.name for item in allowed_models],
@@ -760,13 +768,13 @@ class SessionService:
             raise ValueError(f"unknown session: {session_id}")
         return session
 
-    def _resolve_db_path(self, name: str, session_id: str, use_dedicated_db: bool) -> str:
+    def _resolve_db_dir(self, name: str, session_id: str, use_dedicated_db: bool) -> str:
         if not use_dedicated_db:
-            return str(self._settings.sessions.shared_db_path)
+            return str(self._settings.sessions.shared_db_dir)
         slug = slugify_session_name(name)
         if not slug:
             slug = "session"
-        return str(self._settings.sessions.db_directory / f"{slug}-{session_id[:8]}.kuzu")
+        return str(self._settings.sessions.db_directory / f"{slug}-{session_id[:8]}")
 
 
 def normalize_session_name(name: str) -> str:
@@ -779,10 +787,19 @@ def slugify_session_name(name: str) -> str:
     return value.strip("-")
 
 
-def _ensure_db_path(db_path: str) -> None:
-    path = Path(db_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    KuzuGateway(str(path))
+def _memory_db_path(db_dir: str) -> str:
+    return str(Path(db_dir) / "memory.kuzu")
+
+
+def _research_meta_db_path(db_dir: str) -> str:
+    return str(Path(db_dir) / "research_meta.kuzu")
+
+
+def _ensure_db_layout(db_dir: str) -> None:
+    path = Path(db_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    KuzuGateway(_memory_db_path(str(path)))
+    KuzuGateway(_research_meta_db_path(str(path)))
 
 
 def _stringify_result(result: Any) -> str:

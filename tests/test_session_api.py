@@ -38,7 +38,7 @@ class FakeTraceStore:
     def read_trace(self, trace_id: str) -> ExecutionTrace:
         return ExecutionTrace(
             trace_id=trace_id,
-            request=MissionRequest(prompt="p", db_path="/tmp/db.kuzu"),
+            request=MissionRequest(prompt="p", memory_db_path="/tmp/memory.kuzu", research_meta_db_path="/tmp/research_meta.kuzu"),
             model_sequence=["openai/gpt-4.1-mini"],
             tool_calls=[],
             db_mutations=[],
@@ -131,10 +131,11 @@ class SteerableFakeMissionService(FakeMissionService):
 
 
 class FakeGraphSnapshotService:
-    def build_snapshot(self, session_id: str, db_path: str) -> SessionGraphResponse:
+    def build_snapshot(self, session_id: str, target: str, db_path: str) -> SessionGraphResponse:
         return SessionGraphResponse(
             session_id=session_id,
-            db_path=db_path,
+            target=target,
+            graph_db_path=db_path,
             generated_at=utc_now().isoformat(),
             node_count=1,
             edge_count=0,
@@ -167,6 +168,7 @@ def test_open_resume_and_update_session(tmp_path: Path) -> None:
         directory=tmp_path / "sessions-open",
         db_directory=tmp_path / "dbs-open",
         shared_db_path=tmp_path / "dbs-open" / "shared.kuzu",
+        shared_db_dir=tmp_path / "dbs-open" / "shared",
     )
     mission_service = FakeMissionService()
     service = SessionService(settings, mission_service, SessionStore(settings.sessions))
@@ -176,7 +178,9 @@ def test_open_resume_and_update_session(tmp_path: Path) -> None:
 
     assert first.session_id == second.session_id
     assert first.web_tool_call_limit == 4
-    assert first.db_path.endswith(".kuzu")
+    assert first.db_dir.endswith("shared") is False
+    assert first.memory_db_path.endswith("memory.kuzu")
+    assert first.research_meta_db_path.endswith("research_meta.kuzu")
     assert (settings.sessions.directory / f"{first.session_id}.context.json").exists()
 
     updated = service.update(first.session_id, SessionUpdateRequest(web_tool_call_limit=9))
@@ -190,6 +194,7 @@ def test_grouped_open_and_fork_inheritance(tmp_path: Path) -> None:
         directory=tmp_path / "sessions-groups",
         db_directory=tmp_path / "dbs-groups",
         shared_db_path=tmp_path / "dbs-groups" / "shared.kuzu",
+        shared_db_dir=tmp_path / "dbs-groups" / "shared",
     )
     mission_service = FakeMissionService()
     service = SessionService(settings, mission_service, SessionStore(settings.sessions))
@@ -222,7 +227,7 @@ def test_grouped_open_and_fork_inheritance(tmp_path: Path) -> None:
 
     assert forked.session_group_id is not None
     assert forked.session_group_name == "Alpha Group"
-    assert forked.db_path == source.db_path
+    assert forked.db_dir == source.db_dir
     assert forked.turns == []
     forked_context = SessionContextStore(settings.sessions).load(forked.session_id)
     assert forked_context is not None
@@ -238,7 +243,7 @@ def test_grouped_open_and_fork_inheritance(tmp_path: Path) -> None:
     assert resumed.session_id == forked.session_id
     assert grouped_new.session_id not in {source.session_id, forked.session_id}
     assert grouped_new.session_group_id == forked.session_group_id
-    assert grouped_new.db_path == source.db_path
+    assert grouped_new.db_dir == source.db_dir
 
 
 def test_fork_can_clone_context(tmp_path: Path) -> None:
@@ -247,6 +252,7 @@ def test_fork_can_clone_context(tmp_path: Path) -> None:
         directory=tmp_path / "sessions-fork-context",
         db_directory=tmp_path / "dbs-fork-context",
         shared_db_path=tmp_path / "dbs-fork-context" / "shared.kuzu",
+        shared_db_dir=tmp_path / "dbs-fork-context" / "shared",
     )
     mission_service = FakeMissionService()
     service = SessionService(settings, mission_service, SessionStore(settings.sessions))
@@ -284,7 +290,8 @@ def test_list_sessions_uses_summary_records(tmp_path: Path) -> None:
         settings.sessions = SessionSettings(
             directory=tmp_path / "sessions-list",
             db_directory=tmp_path / "dbs-list",
-            shared_db_path=tmp_path / "dbs-list" / "shared.kuzu",
+        shared_db_path=tmp_path / "dbs-list" / "shared.kuzu",
+        shared_db_dir=tmp_path / "dbs-list" / "shared",
         )
         mission_service = FakeMissionService()
         store = SessionStore(settings.sessions)
@@ -310,6 +317,7 @@ def test_session_chat_persists_and_uses_web_limit(tmp_path: Path) -> None:
         directory=tmp_path / "sessions-chat",
         db_directory=tmp_path / "dbs-chat",
         shared_db_path=tmp_path / "dbs-chat" / "shared.kuzu",
+        shared_db_dir=tmp_path / "dbs-chat" / "shared",
     )
     mission_service = FakeMissionService()
     service = SessionService(settings, mission_service, SessionStore(settings.sessions))
@@ -342,6 +350,7 @@ def test_session_prompt_prioritizes_current_mission(tmp_path: Path) -> None:
         directory=tmp_path / "sessions-prompt",
         db_directory=tmp_path / "dbs-prompt",
         shared_db_path=tmp_path / "dbs-prompt" / "shared.kuzu",
+        shared_db_dir=tmp_path / "dbs-prompt" / "shared",
     )
     mission_service = FakeMissionService()
     service = SessionService(settings, mission_service, SessionStore(settings.sessions))
@@ -364,6 +373,7 @@ def test_soft_stop_injects_wrapup_prompt_and_resumes(tmp_path: Path) -> None:
         directory=tmp_path / "sessions-soft-stop",
         db_directory=tmp_path / "dbs-soft-stop",
         shared_db_path=tmp_path / "dbs-soft-stop" / "shared.kuzu",
+        shared_db_dir=tmp_path / "dbs-soft-stop" / "shared",
     )
     mission_service = FakeMissionService()
     service = SessionService(settings, mission_service, SessionStore(settings.sessions))
@@ -396,6 +406,7 @@ def test_hard_stop_cancels_active_run_and_blocks_future_messages(tmp_path: Path)
         directory=tmp_path / "sessions-hard-stop",
         db_directory=tmp_path / "dbs-hard-stop",
         shared_db_path=tmp_path / "dbs-hard-stop" / "shared.kuzu",
+        shared_db_dir=tmp_path / "dbs-hard-stop" / "shared",
     )
     mission_service = FakeMissionService()
     service = SessionService(settings, mission_service, SessionStore(settings.sessions))
@@ -422,6 +433,7 @@ def test_session_context_compacts_without_dropping_visible_history(tmp_path: Pat
         directory=tmp_path / "sessions-compact",
         db_directory=tmp_path / "dbs-compact",
         shared_db_path=tmp_path / "dbs-compact" / "shared.kuzu",
+        shared_db_dir=tmp_path / "dbs-compact" / "shared",
         active_context_turn_limit=2,
     )
     settings.compression.fallback_budget_chars = 100
@@ -459,6 +471,7 @@ def test_session_steer_restarts_active_run_with_preserved_context(tmp_path: Path
             directory=tmp_path / "sessions-steer",
             db_directory=tmp_path / "dbs-steer",
             shared_db_path=tmp_path / "dbs-steer" / "shared.kuzu",
+            shared_db_dir=tmp_path / "dbs-steer" / "shared",
         )
         mission_service = SteerableFakeMissionService()
         service = SessionService(settings, mission_service, SessionStore(settings.sessions))
@@ -494,6 +507,7 @@ def test_session_routes_stream_and_graph(tmp_path: Path) -> None:
             directory=tmp_path / "sessions-routes",
             db_directory=tmp_path / "dbs-routes",
             shared_db_path=tmp_path / "dbs-routes" / "shared.kuzu",
+            shared_db_dir=tmp_path / "dbs-routes" / "shared",
         )
         mission_service = FakeMissionService()
         store = SessionStore(settings.sessions)
@@ -524,6 +538,7 @@ def test_session_routes_stream_and_graph(tmp_path: Path) -> None:
     assert "session.response" in event_names
     assert graph_payload["node_count"] == 1
     assert detail_payload["web_tool_call_limit"] == 5
+    assert detail_payload["memory_db_path"].endswith("memory.kuzu")
     assert detail_payload["turns"][-1]["web_tool_call_limit_used"] == 6
 
 
@@ -535,6 +550,7 @@ def test_session_stop_routes_update_status_and_resume(tmp_path: Path) -> None:
             directory=tmp_path / "sessions-stop-routes",
             db_directory=tmp_path / "dbs-stop-routes",
             shared_db_path=tmp_path / "dbs-stop-routes" / "shared.kuzu",
+            shared_db_dir=tmp_path / "dbs-stop-routes" / "shared",
         )
         mission_service = FakeMissionService()
         store = SessionStore(settings.sessions)
@@ -575,6 +591,7 @@ def test_session_steer_route_requires_active_run(tmp_path: Path) -> None:
             directory=tmp_path / "sessions-steer-route",
             db_directory=tmp_path / "dbs-steer-route",
             shared_db_path=tmp_path / "dbs-steer-route" / "shared.kuzu",
+            shared_db_dir=tmp_path / "dbs-steer-route" / "shared",
         )
         mission_service = FakeMissionService()
         store = SessionStore(settings.sessions)
@@ -600,6 +617,7 @@ def test_session_routes_page_turns(tmp_path: Path) -> None:
             directory=tmp_path / "sessions-page",
             db_directory=tmp_path / "dbs-page",
             shared_db_path=tmp_path / "dbs-page" / "shared.kuzu",
+            shared_db_dir=tmp_path / "dbs-page" / "shared",
         )
         mission_service = FakeMissionService()
         store = SessionStore(settings.sessions)

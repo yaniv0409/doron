@@ -15,7 +15,8 @@ def utc_now() -> datetime:
 
 class MissionRequest(BaseModel):
     prompt: str = Field(min_length=1)
-    db_path: str = Field(min_length=1)
+    memory_db_path: str = Field(min_length=1)
+    research_meta_db_path: str = Field(min_length=1)
     output_schema: dict[str, Any] | None = None
     preferred_model: str | None = None
     allowed_models: list[str] | None = None
@@ -421,7 +422,9 @@ class ResearchSessionSummary(BaseModel):
     session_group_id: str | None = None
     session_group_name: str | None = None
     uses_dedicated_db: bool = False
-    db_path: str
+    db_dir: str
+    memory_db_path: str
+    research_meta_db_path: str
     web_tool_call_limit: int | None = Field(default=None, ge=0)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
@@ -451,7 +454,9 @@ class ResearchSession(BaseModel):
     session_group_id: str | None = None
     session_group_name: str | None = None
     uses_dedicated_db: bool = False
-    db_path: str
+    db_dir: str
+    memory_db_path: str
+    research_meta_db_path: str
     preferred_model: str | None = None
     allowed_models: list[str] | None = None
     output_schema: dict[str, Any] | None = None

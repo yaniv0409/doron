@@ -12,14 +12,15 @@ class GraphSnapshotService:
     def __init__(self, settings: SessionSettings) -> None:
         self._settings = settings
 
-    def build_snapshot(self, session_id: str, db_path: str) -> SessionGraphResponse:
+    def build_snapshot(self, session_id: str, target: str, db_path: str) -> SessionGraphResponse:
         try:
             gateway = KuzuGateway(db_path, read_only=True)
             tables = gateway.show_tables()
         except Exception:
             return SessionGraphResponse(
                 session_id=session_id,
-                db_path=db_path,
+                target=target,
+                graph_db_path=db_path,
                 generated_at=utc_now().isoformat(),
                 node_count=0,
                 edge_count=0,
@@ -51,7 +52,8 @@ class GraphSnapshotService:
 
         return SessionGraphResponse(
             session_id=session_id,
-            db_path=db_path,
+            target=target,
+            graph_db_path=db_path,
             generated_at=utc_now().isoformat(),
             node_count=len(node_map),
             edge_count=len(edge_map),

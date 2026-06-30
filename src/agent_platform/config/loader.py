@@ -64,8 +64,8 @@ def apply_environment(settings: AppSettings, environ: dict[str, str] | os._Envir
     )
     _set_if_present(
         environ,
-        "AGENT_PLATFORM_SHARED_DB_PATH",
-        lambda value: _setattr(settings.sessions, "shared_db_path", Path(value)),
+        "AGENT_PLATFORM_SHARED_DB_DIR",
+        lambda value: _setattr(settings.sessions, "shared_db_dir", Path(value)),
     )
     _set_if_present(
         environ,

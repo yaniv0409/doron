@@ -31,7 +31,8 @@ class RuntimeServices:
 @dataclass(slots=True)
 class MissionRuntime:
     context: RuntimeContext
-    db: KuzuGateway
+    memory_db: KuzuGateway
+    research_meta_db: KuzuGateway
     browser: PlaywrightBrowserEngine
     services: RuntimeServices
 
@@ -61,14 +62,16 @@ class RuntimeBuilder:
             allowed_models=allowed_models,
             web_tool_call_budget=request.web_tool_call_limit or self._services.settings.browser.web_tool_call_budget,
         )
-        db = KuzuGateway(request.db_path)
+        memory_db = KuzuGateway(request.memory_db_path)
+        research_meta_db = KuzuGateway(request.research_meta_db_path)
         browser = PlaywrightBrowserEngine(
             self._services.settings.browser,
             telemetry_hook=lambda event: _record_browser_event(context, event),
         )
         return MissionRuntime(
             context=context,
-            db=db,
+            memory_db=memory_db,
+            research_meta_db=research_meta_db,
             browser=browser,
             services=self._services,
         )

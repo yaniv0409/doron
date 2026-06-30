@@ -155,12 +155,17 @@ async def chat_stream(session_id: str, request: SessionChatRequest, http_request
 
 @router.get("/sessions/{session_id}/graph", response_model=SessionGraphResponse)
 async def graph(session_id: str, http_request: Request) -> SessionGraphResponse:
+    return await graph_with_target(session_id, "memory", http_request)
+
+
+@router.get("/sessions/{session_id}/graph/{target}", response_model=SessionGraphResponse)
+async def graph_with_target(session_id: str, target: str, http_request: Request) -> SessionGraphResponse:
     session_service: SessionService = http_request.app.state.session_service
     graph_service: GraphSnapshotService = http_request.app.state.graph_snapshot_service
     session = session_service.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "session not found"})
-    return graph_service.build_snapshot(session.session_id, session.db_path)
+    return graph_service.build_snapshot(session.session_id, target, _graph_db_path(session, target))
 
 
 async def _stream_chat(service: SessionService, session_id: str, request: SessionChatRequest):
@@ -234,7 +239,9 @@ def _session_summary(session: ResearchSession) -> SessionSummaryResponse:
             session_group_id=session.session_group_id,
             session_group_name=session.session_group_name,
             uses_dedicated_db=session.uses_dedicated_db,
-            db_path=session.db_path,
+            db_dir=session.db_dir,
+            memory_db_path=session.memory_db_path,
+            research_meta_db_path=session.research_meta_db_path,
             web_tool_call_limit=session.web_tool_call_limit,
             updated_at=session.updated_at.isoformat(),
             created_at=session.created_at.isoformat(),
@@ -251,7 +258,9 @@ def _session_summary(session: ResearchSession) -> SessionSummaryResponse:
         session_group_id=session.session_group_id,
         session_group_name=session.session_group_name,
         uses_dedicated_db=session.uses_dedicated_db,
-        db_path=session.db_path,
+        db_dir=session.db_dir,
+        memory_db_path=session.memory_db_path,
+        research_meta_db_path=session.research_meta_db_path,
         web_tool_call_limit=session.web_tool_call_limit,
         updated_at=session.updated_at.isoformat(),
         created_at=session.created_at.isoformat(),
@@ -327,3 +336,11 @@ def _error_payload(error) -> dict[str, Any] | None:
     if error is None:
         return None
     return {"code": error.code, "message": error.message, "details": error.details}
+
+
+def _graph_db_path(session: ResearchSession, target: str) -> str:
+    if target == "memory":
+        return session.memory_db_path
+    if target == "research_meta":
+        return session.research_meta_db_path
+    raise HTTPException(status_code=400, detail={"code": "invalid_target", "message": "unknown graph target"})
