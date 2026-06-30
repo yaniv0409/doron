@@ -12,8 +12,10 @@ from agent_platform.application.session_service import SessionService
 from agent_platform.config.settings import AppSettings, SessionSettings
 from agent_platform.contracts.session import (
     SessionChatRequest,
+    SessionForkRequest,
     SessionGraphResponse,
     SessionOpenRequest,
+    SessionSteerRequest,
     SessionStopRequest,
     SessionUpdateRequest,
 )
@@ -102,6 +104,32 @@ class FakeMissionService:
         )
 
 
+class SteerableFakeMissionService(FakeMissionService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.first_run_started = asyncio.Event()
+        self.allow_completion = asyncio.Event()
+
+    async def run(self, request: MissionRequest, *, event_hook=None) -> MissionResult:
+        self.requests.append(request)
+        trace_id = f"trace-{len(self.requests)}"
+        if event_hook is not None:
+            event_hook({"event": "mission.started", "data": {"trace_id": trace_id, "model": "openai/gpt-4.1-mini"}})
+        if len(self.requests) == 1:
+            self.first_run_started.set()
+            await self.allow_completion.wait()
+        return MissionResult(
+            status=MissionStatus.COMPLETED,
+            result=f"assistant reply {len(self.requests)}",
+            result_format=ResultFormat.TEXT,
+            final_model="openai/gpt-4.1-mini",
+            trace_id=trace_id,
+            started_at=utc_now(),
+            completed_at=utc_now(),
+            completion=CompletionMetadata(finish_reason="stop", usage={"output_tokens": 11}),
+        )
+
+
 class FakeGraphSnapshotService:
     def build_snapshot(self, session_id: str, db_path: str) -> SessionGraphResponse:
         return SessionGraphResponse(
@@ -154,6 +182,99 @@ def test_open_resume_and_update_session(tmp_path: Path) -> None:
     updated = service.update(first.session_id, SessionUpdateRequest(web_tool_call_limit=9))
 
     assert updated.web_tool_call_limit == 9
+
+
+def test_grouped_open_and_fork_inheritance(tmp_path: Path) -> None:
+    settings = AppSettings()
+    settings.sessions = SessionSettings(
+        directory=tmp_path / "sessions-groups",
+        db_directory=tmp_path / "dbs-groups",
+        shared_db_path=tmp_path / "dbs-groups" / "shared.kuzu",
+    )
+    mission_service = FakeMissionService()
+    service = SessionService(settings, mission_service, SessionStore(settings.sessions))
+    preferred_model = settings.models[0].name
+    source = service.open(
+        SessionOpenRequest(
+            name="Alpha",
+            use_dedicated_db=True,
+            preferred_model=preferred_model,
+            allowed_models=[preferred_model],
+            output_schema={"type": "object"},
+            web_enabled=False,
+            db_mutation_enabled=False,
+            web_tool_call_limit=4,
+        )
+    )
+    asyncio.run(service.run_chat(source.session_id, SessionChatRequest(message="Seed context")))
+
+    forked = service.fork(
+        source.session_id,
+        SessionForkRequest(
+            name="Alpha Fork",
+            group_name="Alpha Group",
+            inherit_model_settings=True,
+            inherit_output_schema=True,
+            inherit_runtime_settings=True,
+            inherit_context=False,
+        ),
+    )
+
+    assert forked.session_group_id is not None
+    assert forked.session_group_name == "Alpha Group"
+    assert forked.db_path == source.db_path
+    assert forked.turns == []
+    forked_context = SessionContextStore(settings.sessions).load(forked.session_id)
+    assert forked_context is not None
+    assert forked_context.active_turns == []
+    source_after = service.get(source.session_id)
+    assert source_after is not None
+    assert source_after.session_group_id == forked.session_group_id
+    assert source_after.session_group_name == "Alpha Group"
+
+    resumed = service.open(SessionOpenRequest(name="alpha fork", session_group_id=forked.session_group_id))
+    grouped_new = service.open(SessionOpenRequest(name="Alpha Branch", session_group_id=forked.session_group_id))
+
+    assert resumed.session_id == forked.session_id
+    assert grouped_new.session_id not in {source.session_id, forked.session_id}
+    assert grouped_new.session_group_id == forked.session_group_id
+    assert grouped_new.db_path == source.db_path
+
+
+def test_fork_can_clone_context(tmp_path: Path) -> None:
+    settings = AppSettings()
+    settings.sessions = SessionSettings(
+        directory=tmp_path / "sessions-fork-context",
+        db_directory=tmp_path / "dbs-fork-context",
+        shared_db_path=tmp_path / "dbs-fork-context" / "shared.kuzu",
+    )
+    mission_service = FakeMissionService()
+    service = SessionService(settings, mission_service, SessionStore(settings.sessions))
+    source = service.open(SessionOpenRequest(name="Clone Source"))
+    updated, *_ = asyncio.run(service.run_chat(source.session_id, SessionChatRequest(message="Preserve this context")))
+
+    cloned = service.fork(
+        source.session_id,
+        SessionForkRequest(
+            name="Clone Fork",
+            group_name="Clone Group",
+            inherit_model_settings=False,
+            inherit_output_schema=False,
+            inherit_runtime_settings=False,
+            inherit_context=True,
+        ),
+    )
+
+    cloned_context = SessionContextStore(settings.sessions).load(cloned.session_id)
+    assert cloned.session_group_name == "Clone Group"
+    assert len(cloned.turns) == len(updated.turns)
+    assert cloned.turns[0].content == updated.turns[0].content
+    assert cloned_context is not None
+    assert len(cloned_context.active_turns) == len(updated.turns)
+    assert cloned_context.current_mission_message_id == updated.turns[0].message_id
+    assert cloned.preferred_model is None
+    assert cloned.output_schema is None
+    assert cloned.web_tool_call_limit is None
 
 
 def test_list_sessions_uses_summary_records(tmp_path: Path) -> None:
@@ -331,6 +452,40 @@ def test_session_context_compacts_without_dropping_visible_history(tmp_path: Pat
     assert context.compression_notice == "session context compacted"
 
 
+def test_session_steer_restarts_active_run_with_preserved_context(tmp_path: Path) -> None:
+    async def scenario():
+        settings = AppSettings()
+        settings.sessions = SessionSettings(
+            directory=tmp_path / "sessions-steer",
+            db_directory=tmp_path / "dbs-steer",
+            shared_db_path=tmp_path / "dbs-steer" / "shared.kuzu",
+        )
+        mission_service = SteerableFakeMissionService()
+        service = SessionService(settings, mission_service, SessionStore(settings.sessions))
+        session = service.open(SessionOpenRequest(name="Steer Session"))
+
+        run_task = asyncio.create_task(service.run_chat(session.session_id, SessionChatRequest(message="Research Nvidia")))
+        await mission_service.first_run_started.wait()
+        steered = service.steer(session.session_id, SessionSteerRequest(message="Focus on pricing and guidance"))
+        mission_service.allow_completion.set()
+        updated, *_ = await run_task
+        context = SessionContextStore(settings.sessions).load(session.session_id)
+        return steered, updated, mission_service.requests, context
+
+    steered, updated, requests, context = asyncio.run(scenario())
+
+    assert steered.turns[-1].role == "steer"
+    assert len(requests) == 2
+    assert "Current mission:\nResearch Nvidia" in requests[0].prompt
+    assert "Live steering updates:" not in requests[0].prompt
+    assert "Current mission:\nResearch Nvidia" in requests[1].prompt
+    assert "Live steering updates:\n- Focus on pricing and guidance" in requests[1].prompt
+    assert [turn.role for turn in updated.turns] == ["user", "steer", "assistant"]
+    assert updated.turns[-1].content == "assistant reply 2"
+    assert context is not None
+    assert context.current_mission_message_id == updated.turns[0].message_id
+
+
 def test_session_routes_stream_and_graph(tmp_path: Path) -> None:
     async def scenario() -> tuple[list[tuple[str, dict[str, object]]], dict[str, object], dict[str, object]]:
         app = create_app()
@@ -410,6 +565,31 @@ def test_session_stop_routes_update_status_and_resume(tmp_path: Path) -> None:
     assert payload["resumed"]["stop_reason"] is None
     assert payload["resumed"]["is_closed"] is False
     assert payload["detail"]["stop_mode"] is None
+
+
+def test_session_steer_route_requires_active_run(tmp_path: Path) -> None:
+    async def scenario() -> tuple[int, dict[str, object]]:
+        app = create_app()
+        settings = AppSettings()
+        settings.sessions = SessionSettings(
+            directory=tmp_path / "sessions-steer-route",
+            db_directory=tmp_path / "dbs-steer-route",
+            shared_db_path=tmp_path / "dbs-steer-route" / "shared.kuzu",
+        )
+        mission_service = FakeMissionService()
+        store = SessionStore(settings.sessions)
+        app.state.session_service = SessionService(settings, mission_service, store)
+        app.state.graph_snapshot_service = FakeGraphSnapshotService()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            opened = await client.post("/sessions/open", json={"name": "Steer Route"})
+            session_id = opened.json()["session_id"]
+            response = await client.post(f"/sessions/{session_id}/steer", json={"message": "Focus the mission"})
+        return response.status_code, response.json()
+
+    status_code, payload = asyncio.run(scenario())
+    assert status_code == 400
+    assert payload["error"]["message"] == "session is not actively running"
 
 
 def test_session_routes_page_turns(tmp_path: Path) -> None:

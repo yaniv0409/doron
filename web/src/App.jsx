@@ -121,14 +121,48 @@ export default function App() {
   );
 
   const openSession = useCallback(
-    async ({ name, useDedicatedDb, webToolCallLimit }) => {
+    async ({ name, dbMode, sessionGroupId, webToolCallLimit }) => {
       const response = await fetch(`${API_BASE}/sessions/open`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
-          use_dedicated_db: useDedicatedDb,
+          use_dedicated_db: dbMode === "dedicated",
+          session_group_id: dbMode === "group" ? sessionGroupId : null,
           web_tool_call_limit: toNullableNumber(webToolCallLimit),
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setError(readError(payload));
+        return false;
+      }
+      await Promise.all([refreshSessions().catch(() => {}), loadSession(payload.session_id)]);
+      return true;
+    },
+    [loadSession, refreshSessions],
+  );
+
+  const forkSession = useCallback(
+    async ({
+      sourceSessionId,
+      name,
+      groupName,
+      inheritModelSettings,
+      inheritOutputSchema,
+      inheritRuntimeSettings,
+      inheritContext,
+    }) => {
+      const response = await fetch(`${API_BASE}/sessions/${sourceSessionId}/fork`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          group_name: groupName || null,
+          inherit_model_settings: inheritModelSettings,
+          inherit_output_schema: inheritOutputSchema,
+          inherit_runtime_settings: inheritRuntimeSettings,
+          inherit_context: inheritContext,
         }),
       });
       const payload = await response.json();
@@ -236,6 +270,28 @@ export default function App() {
       if (!trimmedMessage) {
         return false;
       }
+      if (isSending) {
+        const optimisticTurn = createTurn({
+          role: "steer",
+          content: trimmedMessage,
+        });
+        setError("");
+        setActiveSession((current) => appendTurn(current, sessionId, optimisticTurn));
+        const response = await fetch(`${API_BASE}/sessions/${sessionId}/steer`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: trimmedMessage }),
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          setError(readError(payload));
+          return false;
+        }
+        setActiveSession(payload);
+        await refreshSessions().catch(() => {});
+        return true;
+      }
+
       const optimisticTurn = createTurn({
         role: "user",
         content: trimmedMessage,
@@ -273,7 +329,7 @@ export default function App() {
       void refreshSessions().catch(() => {});
       return true;
     },
-    [refreshSessions],
+    [isSending, refreshSessions],
   );
 
   const handleStreamEvent = useCallback(
@@ -303,6 +359,9 @@ export default function App() {
           return appendTurn(current, current.session_id, assistantTurn);
         });
       }
+      if (eventName === "session.steered" || eventName === "session.restarted") {
+        setError("");
+      }
       if (eventName === "session.graph.updated" && payload.session_id) {
         void refreshGraph(payload.session_id);
       }
@@ -321,6 +380,7 @@ export default function App() {
     <div className="app-shell">
       <SessionSidebar
         activeSessionId={activeSession?.session_id ?? null}
+        onForkSession={forkSession}
         onOpenSession={openSession}
         onSelectSession={handleSelectSession}
         sessions={sessions}
@@ -352,22 +412,84 @@ export default function App() {
   );
 }
 
-function SessionSidebar({ activeSessionId, onOpenSession, onSelectSession, sessions }) {
+function SessionSidebar({ activeSessionId, onForkSession, onOpenSession, onSelectSession, sessions }) {
   const [sessionName, setSessionName] = useState("");
-  const [useDedicatedDb, setUseDedicatedDb] = useState(false);
+  const [dbMode, setDbMode] = useState("shared");
+  const [selectedGroupId, setSelectedGroupId] = useState("");
   const [webToolCallLimit, setWebToolCallLimit] = useState("");
+  const [contextMenu, setContextMenu] = useState(null);
+  const [forkDraft, setForkDraft] = useState(null);
+
+  const sessionGroups = useMemo(() => buildSessionGroups(sessions), [sessions]);
+  const groupedSessions = useMemo(() => buildSidebarEntries(sessions), [sessions]);
+
+  useEffect(() => {
+    function handleWindowClick() {
+      setContextMenu(null);
+    }
+    window.addEventListener("click", handleWindowClick);
+    return () => window.removeEventListener("click", handleWindowClick);
+  }, []);
+
+  useEffect(() => {
+    if (dbMode !== "group") {
+      return;
+    }
+    if (selectedGroupId) {
+      return;
+    }
+    if (sessionGroups.length > 0) {
+      setSelectedGroupId(sessionGroups[0].session_group_id);
+    }
+  }, [dbMode, selectedGroupId, sessionGroups]);
 
   async function handleSubmit(event) {
     event.preventDefault();
     const ok = await onOpenSession({
       name: sessionName,
-      useDedicatedDb,
+      dbMode,
+      sessionGroupId: selectedGroupId,
       webToolCallLimit,
     });
     if (ok) {
       setSessionName("");
-      setUseDedicatedDb(false);
+      setDbMode("shared");
+      setSelectedGroupId("");
       setWebToolCallLimit("");
+    }
+  }
+
+  function handleContextMenu(event, session) {
+    event.preventDefault();
+    setContextMenu({
+      session,
+      x: event.clientX,
+      y: event.clientY,
+    });
+  }
+
+  function openForkDialog(session) {
+    setContextMenu(null);
+    setForkDraft({
+      sourceSessionId: session.session_id,
+      sourceSession: session,
+      name: `${session.name} Fork`,
+      groupName: session.session_group_name || session.name,
+      inheritModelSettings: true,
+      inheritOutputSchema: true,
+      inheritRuntimeSettings: true,
+      inheritContext: false,
+    });
+  }
+
+  async function submitFork(event) {
+    event.preventDefault();
+    if (!forkDraft) {
+      return;
+    }
+    const ok = await onForkSession(forkDraft);
+    if (ok) {
+      setForkDraft(null);
     }
   }
 
@@ -386,10 +508,28 @@ function SessionSidebar({ activeSessionId, onOpenSession, onSelectSession, sessi
             Session name
             <input value={sessionName} onChange={(event) => setSessionName(event.target.value)} required />
           </label>
-          <label className="checkbox">
-            <input checked={useDedicatedDb} type="checkbox" onChange={(event) => setUseDedicatedDb(event.target.checked)} />
-            Use dedicated project DB
+          <label>
+            DB target
+            <select value={dbMode} onChange={(event) => setDbMode(event.target.value)}>
+              <option value="shared">Standalone shared DB</option>
+              <option value="dedicated">Dedicated DB</option>
+              <option value="group" disabled={sessionGroups.length === 0}>
+                Existing group
+              </option>
+            </select>
           </label>
+          {dbMode === "group" ? (
+            <label>
+              Existing group
+              <select value={selectedGroupId} onChange={(event) => setSelectedGroupId(event.target.value)} required>
+                {sessionGroups.map((group) => (
+                  <option key={group.session_group_id} value={group.session_group_id}>
+                    {group.session_group_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <label>
             Session web limit
             <input
@@ -405,19 +545,129 @@ function SessionSidebar({ activeSessionId, onOpenSession, onSelectSession, sessi
 
         <div className="card session-list">
           <h2>Sessions</h2>
-          {sessions.map((session) => (
-            <button
-              className={`session-item ${activeSessionId === session.session_id ? "active" : ""}`}
-              key={session.session_id}
-              onClick={() => onSelectSession(session.session_id)}
-              type="button"
-            >
-              <span>{session.name}</span>
-              <small>{formatSessionStatus(session)}</small>
-            </button>
-          ))}
+          {groupedSessions.map((entry) =>
+            entry.kind === "group" ? (
+              <div className="session-group" key={entry.group.session_group_id}>
+                <div className="session-group-header">
+                  <strong>{entry.group.session_group_name}</strong>
+                  <small>{entry.group.db_path}</small>
+                </div>
+                <div className="session-group-items">
+                  {entry.sessions.map((session) => (
+                    <button
+                      className={`session-item grouped ${activeSessionId === session.session_id ? "active" : ""}`}
+                      key={session.session_id}
+                      onClick={() => onSelectSession(session.session_id)}
+                      onContextMenu={(event) => handleContextMenu(event, session)}
+                      type="button"
+                    >
+                      <span>{session.name}</span>
+                      <small>{formatSessionStatus(session)}</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <button
+                className={`session-item ${activeSessionId === entry.session.session_id ? "active" : ""}`}
+                key={entry.session.session_id}
+                onClick={() => onSelectSession(entry.session.session_id)}
+                onContextMenu={(event) => handleContextMenu(event, entry.session)}
+                type="button"
+              >
+                <span>{entry.session.name}</span>
+                <small>{formatSessionStatus(entry.session)}</small>
+              </button>
+            ),
+          )}
         </div>
       </div>
+      {contextMenu ? (
+        <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(event) => event.stopPropagation()}>
+          <button type="button" onClick={() => openForkDialog(contextMenu.session)}>
+            Fork session
+          </button>
+        </div>
+      ) : null}
+      {forkDraft ? (
+        <div className="modal-backdrop" onClick={() => setForkDraft(null)}>
+          <div className="modal-card card" onClick={(event) => event.stopPropagation()}>
+            <form className="form-stack" onSubmit={submitFork}>
+              <div>
+                <h2>Fork session</h2>
+                <p>{forkDraft.sourceSession.name}</p>
+              </div>
+              <label>
+                Session name
+                <input
+                  required
+                  value={forkDraft.name}
+                  onChange={(event) => setForkDraft((current) => ({ ...current, name: event.target.value }))}
+                />
+              </label>
+              {forkDraft.sourceSession.session_group_id ? (
+                <label>
+                  Group name
+                  <input disabled value={forkDraft.sourceSession.session_group_name || ""} readOnly />
+                </label>
+              ) : (
+                <label>
+                  Group name
+                  <input
+                    required
+                    value={forkDraft.groupName}
+                    onChange={(event) => setForkDraft((current) => ({ ...current, groupName: event.target.value }))}
+                  />
+                </label>
+              )}
+              <label className="checkbox">
+                <input
+                  checked={forkDraft.inheritModelSettings}
+                  type="checkbox"
+                  onChange={(event) =>
+                    setForkDraft((current) => ({ ...current, inheritModelSettings: event.target.checked }))
+                  }
+                />
+                Inherit model settings
+              </label>
+              <label className="checkbox">
+                <input
+                  checked={forkDraft.inheritOutputSchema}
+                  type="checkbox"
+                  onChange={(event) =>
+                    setForkDraft((current) => ({ ...current, inheritOutputSchema: event.target.checked }))
+                  }
+                />
+                Inherit output schema
+              </label>
+              <label className="checkbox">
+                <input
+                  checked={forkDraft.inheritRuntimeSettings}
+                  type="checkbox"
+                  onChange={(event) =>
+                    setForkDraft((current) => ({ ...current, inheritRuntimeSettings: event.target.checked }))
+                  }
+                />
+                Inherit runtime settings
+              </label>
+              <label className="checkbox">
+                <input
+                  checked={forkDraft.inheritContext}
+                  type="checkbox"
+                  onChange={(event) => setForkDraft((current) => ({ ...current, inheritContext: event.target.checked }))}
+                />
+                Inherit context
+              </label>
+              <div className="modal-actions">
+                <button type="button" onClick={() => setForkDraft(null)}>
+                  Cancel
+                </button>
+                <button type="submit">Fork</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </aside>
   );
 }
@@ -468,7 +718,7 @@ function ChatColumn({
         {turns.map((turn) => (
           <article className={`turn ${turn.role}`} key={turn.message_id}>
             <header>
-              <strong>{turn.role === "user" ? "You" : "Doron"}</strong>
+              <strong>{formatTurnAuthor(turn.role)}</strong>
               <span>{turn.web_tool_call_limit_used ?? "-"}</span>
             </header>
             <TurnContent turn={turn} />
@@ -585,7 +835,7 @@ function Composer({ activeSession, isSending, onSendMessage }) {
 
   async function handleSubmit(event) {
     event.preventDefault();
-    if (!activeSession || isSending) {
+    if (!activeSession) {
       return;
     }
     const ok = await onSendMessage({
@@ -602,10 +852,10 @@ function Composer({ activeSession, isSending, onSendMessage }) {
   return (
     <form className="composer card" onSubmit={handleSubmit}>
       <textarea
-        disabled={!activeSession || isSending || activeSession.is_closed}
+        disabled={!activeSession || activeSession.is_closed}
         value={message}
         onChange={(event) => setMessage(event.target.value)}
-        placeholder="Ask Doron to research, compare, inspect, or write into the graph..."
+        placeholder={isSending ? "Steer the current run..." : "Ask Doron to research, compare, inspect, or write into the graph..."}
         rows={5}
       />
       <div className="composer-controls">
@@ -620,8 +870,8 @@ function Composer({ activeSession, isSending, onSendMessage }) {
             placeholder="use session default"
           />
         </label>
-        <button disabled={!activeSession || isSending || activeSession.is_closed} type="submit">
-          {activeSession?.is_closed ? "Stopped" : isSending ? "Running..." : "Send"}
+        <button disabled={!activeSession || activeSession.is_closed} type="submit">
+          {activeSession?.is_closed ? "Stopped" : isSending ? "Steer" : "Send"}
         </button>
       </div>
     </form>
@@ -842,6 +1092,12 @@ function buildActivityEntry(eventName, payload) {
   if (eventName === "session.message.completed") {
     return { id, kind: "text", text: "Assistant reply completed." };
   }
+  if (eventName === "session.steered") {
+    return { id, kind: "text", text: `Steer queued: ${payload.message || ""}`.trim() };
+  }
+  if (eventName === "session.restarted") {
+    return { id, kind: "text", text: "Mission restarted with updated steering." };
+  }
   if (eventName === "session.graph.updated") {
     return { id, kind: "text", text: "Graph snapshot refreshed." };
   }
@@ -869,13 +1125,69 @@ function toNullableNumber(value) {
 }
 
 function formatSessionStatus(session) {
-  const statusBits = [session.uses_dedicated_db ? "Dedicated DB" : "Shared DB"];
+  const statusBits = [
+    session.session_group_id ? `Group: ${session.session_group_name}` : session.uses_dedicated_db ? "Dedicated DB" : "Shared DB",
+  ];
   if (session.is_closed) {
     statusBits.push("Hard stopped");
   } else if (session.stop_mode === "soft") {
     statusBits.push("Soft stop");
   }
   return statusBits.join(" • ");
+}
+
+function formatTurnAuthor(role) {
+  if (role === "user") {
+    return "You";
+  }
+  if (role === "steer") {
+    return "Steer";
+  }
+  return "Doron";
+}
+
+function buildSessionGroups(sessions) {
+  const groups = new Map();
+  for (const session of sessions) {
+    if (!session.session_group_id) {
+      continue;
+    }
+    if (!groups.has(session.session_group_id)) {
+      groups.set(session.session_group_id, {
+        session_group_id: session.session_group_id,
+        session_group_name: session.session_group_name || "Session group",
+        db_path: session.db_path,
+      });
+    }
+  }
+  return Array.from(groups.values()).sort((left, right) => left.session_group_name.localeCompare(right.session_group_name));
+}
+
+function buildSidebarEntries(sessions) {
+  const grouped = new Map();
+  const standalone = [];
+  for (const session of sessions) {
+    if (!session.session_group_id) {
+      standalone.push({ kind: "session", session });
+      continue;
+    }
+    if (!grouped.has(session.session_group_id)) {
+      grouped.set(session.session_group_id, {
+        kind: "group",
+        group: {
+          session_group_id: session.session_group_id,
+          session_group_name: session.session_group_name || "Session group",
+          db_path: session.db_path,
+        },
+        sessions: [],
+      });
+    }
+    grouped.get(session.session_group_id).sessions.push(session);
+  }
+  const groupEntries = Array.from(grouped.values()).sort((left, right) =>
+    left.group.session_group_name.localeCompare(right.group.session_group_name),
+  );
+  return [...standalone, ...groupEntries];
 }
 
 function extendJsonViewStyles(baseStyles, additions) {

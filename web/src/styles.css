@@ -25,6 +25,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -176,6 +177,32 @@ button {
   overflow: auto;
 }
 
+.session-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-group-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 4px;
+}
+
+.session-group-header small {
+  color: #93a4bb;
+  word-break: break-word;
+}
+
+.session-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 12px;
+  border-left: 1px solid rgba(125, 151, 181, 0.12);
+}
+
 label {
   display: flex;
   flex-direction: column;
@@ -184,6 +211,7 @@ label {
 }
 
 input,
+select,
 textarea {
   width: 100%;
   padding: 9px 11px;
@@ -231,6 +259,10 @@ button:disabled {
 
 .session-item small {
   color: #a9bbcf;
+}
+
+.session-item.grouped {
+  margin-left: 0;
 }
 
 .chat-header,
@@ -329,6 +361,11 @@ button.danger:disabled {
 
 .turn.assistant {
   background: rgba(15, 24, 36, 0.9);
+}
+
+.turn.steer {
+  background: rgba(67, 89, 56, 0.4);
+  border-color: rgba(170, 198, 124, 0.24);
 }
 
 .pending-turn {
@@ -674,6 +711,44 @@ button.danger:disabled {
   border-radius: 14px;
   background: rgba(201, 74, 74, 0.16);
   color: #ffd2d2;
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 180px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(125, 151, 181, 0.16);
+  background: rgba(12, 19, 28, 0.98);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.36);
+}
+
+.context-menu button {
+  width: 100%;
+  text-align: left;
+  background: rgba(20, 32, 46, 0.92);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(4, 8, 13, 0.72);
+}
+
+.modal-card {
+  width: min(100%, 520px);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 @media (max-width: 1180px) {

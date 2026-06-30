@@ -62,9 +62,20 @@ class SessionStore:
             summaries[session.session_id] = summary
         return sorted(summaries.values(), key=lambda item: item.updated_at, reverse=True)
 
-    def find_by_normalized_name(self, normalized_name: str) -> ResearchSession | None:
+    def find_by_normalized_name(self, normalized_name: str, session_group_id: str | None = None) -> ResearchSession | None:
         for summary in self.list_summaries():
             if summary.normalized_name != normalized_name:
+                continue
+            if summary.session_group_id != session_group_id:
+                continue
+            session = self.load(summary.session_id)
+            if session is not None:
+                return session
+        return None
+
+    def find_by_group_id(self, session_group_id: str) -> ResearchSession | None:
+        for summary in self.list_summaries():
+            if summary.session_group_id != session_group_id:
                 continue
             session = self.load(summary.session_id)
             if session is not None:
@@ -83,6 +94,8 @@ def _build_summary(session: ResearchSession) -> ResearchSessionSummary:
         session_id=session.session_id,
         name=session.name,
         normalized_name=session.normalized_name,
+        session_group_id=session.session_group_id,
+        session_group_name=session.session_group_name,
         uses_dedicated_db=session.uses_dedicated_db,
         db_path=session.db_path,
         web_tool_call_limit=session.web_tool_call_limit,

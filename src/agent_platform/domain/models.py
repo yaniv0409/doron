@@ -418,6 +418,8 @@ class ResearchSessionSummary(BaseModel):
     session_id: str
     name: str
     normalized_name: str
+    session_group_id: str | None = None
+    session_group_name: str | None = None
     uses_dedicated_db: bool = False
     db_path: str
     web_tool_call_limit: int | None = Field(default=None, ge=0)
@@ -446,6 +448,8 @@ class ResearchSession(BaseModel):
     session_id: str
     name: str
     normalized_name: str
+    session_group_id: str | None = None
+    session_group_name: str | None = None
     uses_dedicated_db: bool = False
     db_path: str
     preferred_model: str | None = None

@@ -15,7 +15,9 @@ from agent_platform.contracts.session import (
     SessionChatRequest,
     SessionChatResponse,
     SessionDetailResponse,
+    SessionForkRequest,
     SessionGraphResponse,
+    SessionSteerRequest,
     SessionStopRequest,
     SessionSummaryResponse,
     SessionOpenRequest,
@@ -93,6 +95,26 @@ async def resume_session(session_id: str, http_request: Request) -> SessionDetai
     service: SessionService = http_request.app.state.session_service
     try:
         session = service.resume(session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": str(exc)}) from exc
+    return _session_detail(session, turn_limit=12)
+
+
+@router.post("/sessions/{session_id}/fork", response_model=SessionDetailResponse)
+async def fork_session(session_id: str, request: SessionForkRequest, http_request: Request) -> SessionDetailResponse:
+    service: SessionService = http_request.app.state.session_service
+    try:
+        session = service.fork(session_id, request)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": str(exc)}) from exc
+    return _session_detail(session, turn_limit=12)
+
+
+@router.post("/sessions/{session_id}/steer", response_model=SessionDetailResponse)
+async def steer_session(session_id: str, request: SessionSteerRequest, http_request: Request) -> SessionDetailResponse:
+    service: SessionService = http_request.app.state.session_service
+    try:
+        session = service.steer(session_id, request)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": str(exc)}) from exc
     return _session_detail(session, turn_limit=12)
@@ -209,6 +231,8 @@ def _session_summary(session: ResearchSession) -> SessionSummaryResponse:
         return SessionSummaryResponse(
             session_id=session.session_id,
             name=session.name,
+            session_group_id=session.session_group_id,
+            session_group_name=session.session_group_name,
             uses_dedicated_db=session.uses_dedicated_db,
             db_path=session.db_path,
             web_tool_call_limit=session.web_tool_call_limit,
@@ -224,6 +248,8 @@ def _session_summary(session: ResearchSession) -> SessionSummaryResponse:
     return SessionSummaryResponse(
         session_id=session.session_id,
         name=session.name,
+        session_group_id=session.session_group_id,
+        session_group_name=session.session_group_name,
         uses_dedicated_db=session.uses_dedicated_db,
         db_path=session.db_path,
         web_tool_call_limit=session.web_tool_call_limit,

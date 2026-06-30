@@ -12,6 +12,7 @@ from agent_platform.domain.models import CompletionMetadata
 class SessionOpenRequest(BaseModel):
     name: str = Field(min_length=1)
     use_dedicated_db: bool = False
+    session_group_id: str | None = None
     preferred_model: str | None = None
     allowed_models: list[str] | None = None
     output_schema: dict[str, Any] | None = None
@@ -32,6 +33,8 @@ class SessionUpdateRequest(BaseModel):
 class SessionSummaryResponse(BaseModel):
     session_id: str
     name: str
+    session_group_id: str | None = None
+    session_group_name: str | None = None
     uses_dedicated_db: bool
     db_path: str
     web_tool_call_limit: int | None = None
@@ -86,6 +89,19 @@ class SessionDetailResponse(SessionSummaryResponse):
 class SessionStopRequest(BaseModel):
     mode: SessionStopMode
     reason: str | None = None
+
+
+class SessionSteerRequest(BaseModel):
+    message: str = Field(min_length=1)
+
+
+class SessionForkRequest(BaseModel):
+    name: str = Field(min_length=1)
+    group_name: str | None = None
+    inherit_model_settings: bool = True
+    inherit_output_schema: bool = True
+    inherit_runtime_settings: bool = True
+    inherit_context: bool = False
 
 
 class SessionChatRequest(BaseModel):

@@ -12,9 +12,11 @@ Research workspace features:
 
 - named durable research sessions stored as JSON under `sessions/`
 - shared or dedicated graph databases under `dbs/`
+- shared DB session groups so multiple sessions can work against the same graph with separate context
 - live per-request SSE streaming for mission progress and tool activity
 - session-scoped web browsing tool limits with per-message overrides
 - session stop controls for soft wrap-up requests and hard session cancellation
+- live session steering that restarts the current mission with appended guidance
 - a React web UI under `web/` with chat, sessions, and graph inspection
 
 Web extraction behavior:
@@ -102,6 +104,7 @@ Stream mode emits live mission progress, tool events, and the final result over 
 - returns a stable `session_id`
 - uses `dbs/shared.kuzu` by default
 - creates a dedicated `dbs/<session-name>-<id>.kuzu` database when requested
+- accepts optional `session_group_id` to create or resume a session inside an existing shared-DB group
 
 `GET /sessions`
 
@@ -123,6 +126,18 @@ Stream mode emits live mission progress, tool events, and the final result over 
 
 - clear the stop state and reopen a stopped session
 
+`POST /sessions/{session_id}/fork`
+
+- create a new session on the same DB as the source session
+- supports explicit inheritance flags for model settings, output schema, runtime settings, and context
+- creates a shared session group when the source session is not already grouped
+
+`POST /sessions/{session_id}/steer`
+
+- append a live steer message to the active session
+- cancels the in-flight mission and restarts it with the original mission plus the new steer context
+- requires an active run
+
 `POST /sessions/{session_id}/chat`
 
 - blocking chat response
@@ -131,6 +146,7 @@ Stream mode emits live mission progress, tool events, and the final result over 
 
 - streamed SSE chat response
 - emits session events plus the existing mission/tool/progress events
+- steering during a streamed run stays on the same SSE stream and surfaces `session.steered` and `session.restarted`
 
 `GET /sessions/{session_id}/graph`
 
@@ -160,6 +176,9 @@ By default the frontend calls `http://127.0.0.1:8000`. Override with:
 ```bash
 VITE_API_BASE_URL=http://127.0.0.1:8000 npm run dev
 ```
+
+While a mission is running, submitting another message from the web chat becomes a steer instead of opening a new mission. Doron appends that steer to the active session timeline, restarts the mission, and continues from the accumulated session context.
+The web sidebar also groups sessions that share the same DB, and right-clicking a session opens a fork action that creates a sibling session on that DB.
 
 To start both the backend and the frontend together from the repo root:
 

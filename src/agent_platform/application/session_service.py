@@ -4,14 +4,21 @@ import asyncio
 import json
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
 from agent_platform.application.context_compression import ContextCompressor
 from agent_platform.application.mission_service import MissionService
 from agent_platform.config.settings import AppSettings
-from agent_platform.contracts.session import SessionChatRequest, SessionOpenRequest, SessionStopRequest, SessionUpdateRequest
+from agent_platform.contracts.session import (
+    SessionChatRequest,
+    SessionForkRequest,
+    SessionOpenRequest,
+    SessionSteerRequest,
+    SessionStopRequest,
+    SessionUpdateRequest,
+)
 from agent_platform.domain.enums import ResultFormat, SessionStopMode
 from agent_platform.domain.exceptions import RequestValidationError
 from agent_platform.domain.models import (
@@ -41,6 +48,15 @@ class _SessionCompressionRuntime:
     services: Any
 
 
+@dataclass(slots=True)
+class _ActiveSessionRun:
+    task: asyncio.Task[Any]
+    message_id: str
+    pending_steers: list[SessionTurn] = field(default_factory=list)
+    restart_requested: bool = False
+    event_hook: Callable[[dict[str, Any]], None] | None = None
+
+
 class SessionService:
     def __init__(
         self,
@@ -55,11 +71,11 @@ class SessionService:
         self._context_store = context_store or SessionContextStore(settings.sessions)
         self._model_catalog = ModelCatalog(settings)
         self._context_compressor = ContextCompressor(settings.compression)
-        self._active_runs: dict[str, asyncio.Task[Any]] = {}
+        self._active_runs: dict[str, _ActiveSessionRun] = {}
 
     def open(self, request: SessionOpenRequest) -> ResearchSession:
         normalized_name = normalize_session_name(request.name)
-        existing = self._store.find_by_normalized_name(normalized_name)
+        existing = self._store.find_by_normalized_name(normalized_name, request.session_group_id)
         if existing is not None:
             if self._context_store.load(existing.session_id) is None:
                 self._context_store.save(
@@ -71,15 +87,22 @@ class SessionService:
                 )
             return existing
 
+        group_session = self._resolve_group_session(request.session_group_id)
         session_id = str(uuid.uuid4())
-        db_path = self._resolve_db_path(request.name, session_id, request.use_dedicated_db)
+        db_path = group_session.db_path if group_session is not None else self._resolve_db_path(
+            request.name,
+            session_id,
+            request.use_dedicated_db,
+        )
         _ensure_db_path(db_path)
         now = utc_now()
         session = ResearchSession(
             session_id=session_id,
             name=request.name.strip(),
             normalized_name=normalized_name,
-            uses_dedicated_db=request.use_dedicated_db,
+            session_group_id=group_session.session_group_id if group_session is not None else None,
+            session_group_name=group_session.session_group_name if group_session is not None else None,
+            uses_dedicated_db=group_session.uses_dedicated_db if group_session is not None else request.use_dedicated_db,
             db_path=db_path,
             preferred_model=request.preferred_model,
             allowed_models=request.allowed_models,
@@ -99,6 +122,54 @@ class SessionService:
             )
         )
         return session
+
+    def fork(self, session_id: str, request: SessionForkRequest) -> ResearchSession:
+        source = self._require(session_id)
+        now = utc_now()
+        group_id = source.session_group_id
+        group_name = source.session_group_name
+        if group_id is None:
+            group_id = str(uuid.uuid4())
+            group_name = (request.group_name or source.name).strip()
+            source.session_group_id = group_id
+            source.session_group_name = group_name
+            source.updated_at = now
+            self._store.save(source)
+        forked_session_id = str(uuid.uuid4())
+        forked = ResearchSession(
+            session_id=forked_session_id,
+            name=request.name.strip(),
+            normalized_name=normalize_session_name(request.name),
+            session_group_id=group_id,
+            session_group_name=group_name,
+            uses_dedicated_db=source.uses_dedicated_db,
+            db_path=source.db_path,
+            preferred_model=source.preferred_model if request.inherit_model_settings else None,
+            allowed_models=list(source.allowed_models) if request.inherit_model_settings and source.allowed_models else None,
+            output_schema=dict(source.output_schema) if request.inherit_output_schema and source.output_schema else None,
+            web_enabled=source.web_enabled if request.inherit_runtime_settings else True,
+            db_mutation_enabled=source.db_mutation_enabled if request.inherit_runtime_settings else True,
+            web_tool_call_limit=source.web_tool_call_limit if request.inherit_runtime_settings else None,
+            created_at=now,
+            updated_at=now,
+        )
+        self._store.save(forked)
+        if request.inherit_context:
+            source_context = self._load_context(source)
+            forked.turns = [turn.model_copy(deep=True) for turn in source.turns]
+            self._store.save(forked)
+            forked_context = source_context.model_copy(deep=True)
+            forked_context.session_id = forked.session_id
+            self._context_store.save(forked_context)
+        else:
+            self._context_store.save(
+                SessionAgentContext(
+                    session_id=forked.session_id,
+                    active_turns=[],
+                    current_mission_message_id=None,
+                )
+            )
+        return forked
 
     def list_sessions(self) -> list[ResearchSession]:
         return sorted(self._store.list_sessions(), key=lambda item: item.updated_at, reverse=True)
@@ -150,9 +221,9 @@ class SessionService:
                 code="cancelled",
                 message=request.reason or "session hard-stopped",
             )
-            task = self._active_runs.get(session_id)
-            if task is not None and not task.done():
-                task.cancel()
+            active_run = self._active_runs.get(session_id)
+            if active_run is not None and not active_run.task.done():
+                active_run.task.cancel()
         session.updated_at = now
         self._store.save(session)
         return session
@@ -167,6 +238,42 @@ class SessionService:
         session.last_error = None
         session.updated_at = utc_now()
         self._store.save(session)
+        return session
+
+    def steer(self, session_id: str, request: SessionSteerRequest) -> ResearchSession:
+        session = self._require(session_id)
+        if session.is_closed:
+            raise RequestValidationError("session is hard-stopped; resume it before steering")
+        active_run = self._active_runs.get(session_id)
+        if active_run is None or active_run.task.done():
+            raise RequestValidationError("session is not actively running")
+        steer_turn = SessionTurn(
+            message_id=str(uuid.uuid4()),
+            role="steer",
+            content=request.message.strip(),
+        )
+        session.turns.append(steer_turn)
+        session.updated_at = utc_now()
+        self._store.save(session)
+        context_state = self._load_context(session)
+        context_state.active_turns.append(steer_turn)
+        self._context_store.save(context_state)
+        active_run.pending_steers.append(steer_turn)
+        active_run.restart_requested = True
+        if active_run.event_hook is not None:
+            active_run.event_hook(
+                {
+                    "event": "session.steered",
+                    "data": {
+                        "session_id": session.session_id,
+                        "message_id": active_run.message_id,
+                        "steer_message_id": steer_turn.message_id,
+                        "message": steer_turn.content,
+                        "created_at": steer_turn.created_at.isoformat(),
+                    },
+                }
+            )
+        active_run.task.cancel()
         return session
 
     async def run_chat(
@@ -217,81 +324,106 @@ class SessionService:
             }
             event_hook(payload)
 
-        mission_request = self._build_mission_request(session, request, context_state)
-        context_state = await self._compact_context_if_needed(session, mission_request, context_state)
-        self._context_store.save(context_state)
-        mission_request = self._build_mission_request(session, request, context_state)
         task = asyncio.current_task()
         if task is not None:
-            self._active_runs[session_id] = task
+            self._active_runs[session_id] = _ActiveSessionRun(task=task, message_id=message_id, event_hook=event_hook)
         try:
-            result = await self._mission_service.run(
-                mission_request,
-                event_hook=wrapped_event_hook if event_hook is not None else None,
-            )
-            assistant_message = _stringify_result(result.result if result.error is None else result.error.message)
-            assistant_turn = SessionTurn(
-                message_id=str(uuid.uuid4()),
-                role="assistant",
-                content=assistant_message,
-                trace_id=result.trace_id,
-                status=result.status.value,
-                result_format=result.result_format,
-                web_tool_call_limit_used=mission_request.web_tool_call_limit,
-                completion=result.completion,
-            )
-            session.turns.append(assistant_turn)
-            context_state.active_turns.append(assistant_turn)
-            session.last_error = result.error
-            session.updated_at = utc_now()
-            trace = self._read_trace(result.trace_id)
-            session.summary = self._build_summary(trace, session)
-            if context_state.compression_notice:
-                session.summary.compression_notice = context_state.compression_notice
-            self._store.save(session)
-            context_state = await self._compact_context_if_needed(session, mission_request, context_state)
-            if context_state.compression_notice:
-                session.summary.compression_notice = context_state.compression_notice
+            while True:
+                mission_request = self._build_mission_request(session, request, context_state)
+                context_state = await self._compact_context_if_needed(session, mission_request, context_state)
+                self._context_store.save(context_state)
+                mission_request = self._build_mission_request(session, request, context_state)
+                try:
+                    result = await self._mission_service.run(
+                        mission_request,
+                        event_hook=wrapped_event_hook if event_hook is not None else None,
+                    )
+                except asyncio.CancelledError:
+                    active_run = self._active_runs.get(session_id)
+                    if active_run is not None and active_run.restart_requested:
+                        active_run.restart_requested = False
+                        if task is not None:
+                            task.uncancel()
+                        session = self._require(session_id)
+                        context_state = self._load_context(session)
+                        if event_hook is not None:
+                            event_hook(
+                                {
+                                    "event": "session.restarted",
+                                    "data": {
+                                        "session_id": session.session_id,
+                                        "message_id": message_id,
+                                        "steer_count": len(active_run.pending_steers),
+                                        "created_at": utc_now().isoformat(),
+                                    },
+                                }
+                            )
+                        active_run.pending_steers.clear()
+                        continue
+                    raise
+                assistant_message = _stringify_result(result.result if result.error is None else result.error.message)
+                assistant_turn = SessionTurn(
+                    message_id=str(uuid.uuid4()),
+                    role="assistant",
+                    content=assistant_message,
+                    trace_id=result.trace_id,
+                    status=result.status.value,
+                    result_format=result.result_format,
+                    web_tool_call_limit_used=mission_request.web_tool_call_limit,
+                    completion=result.completion,
+                )
+                session.turns.append(assistant_turn)
+                context_state.active_turns.append(assistant_turn)
+                session.last_error = result.error
+                session.updated_at = utc_now()
+                trace = self._read_trace(result.trace_id)
+                session.summary = self._build_summary(trace, session)
+                if context_state.compression_notice:
+                    session.summary.compression_notice = context_state.compression_notice
                 self._store.save(session)
-            self._context_store.save(context_state)
-            if event_hook is not None:
-                event_hook(
-                    {
-                        "event": "session.message.completed" if result.error is None else "session.message.failed",
-                        "data": {
-                            "session_id": session.session_id,
-                            "message_id": message_id,
-                            "trace_id": result.trace_id,
-                            "assistant_message": assistant_message,
-                            "status": result.status.value,
-                            "result_format": result.result_format.value,
-                            "web_tool_call_limit_used": mission_request.web_tool_call_limit,
-                            "completion": result.completion.model_dump(mode="json") if result.completion else None,
-                            "error": _error_payload(result.error),
-                            "created_at": utc_now().isoformat(),
-                        },
-                    }
+                context_state = await self._compact_context_if_needed(session, mission_request, context_state)
+                if context_state.compression_notice:
+                    session.summary.compression_notice = context_state.compression_notice
+                    self._store.save(session)
+                self._context_store.save(context_state)
+                if event_hook is not None:
+                    event_hook(
+                        {
+                            "event": "session.message.completed" if result.error is None else "session.message.failed",
+                            "data": {
+                                "session_id": session.session_id,
+                                "message_id": message_id,
+                                "trace_id": result.trace_id,
+                                "assistant_message": assistant_message,
+                                "status": result.status.value,
+                                "result_format": result.result_format.value,
+                                "web_tool_call_limit_used": mission_request.web_tool_call_limit,
+                                "completion": result.completion.model_dump(mode="json") if result.completion else None,
+                                "error": _error_payload(result.error),
+                                "created_at": utc_now().isoformat(),
+                            },
+                        }
+                    )
+                    event_hook(
+                        {
+                            "event": "session.graph.updated",
+                            "data": {
+                                "session_id": session.session_id,
+                                "message_id": message_id,
+                                "trace_id": result.trace_id,
+                                "created_at": utc_now().isoformat(),
+                            },
+                        }
+                    )
+                return (
+                    session,
+                    result.trace_id,
+                    assistant_message,
+                    result.error,
+                    mission_request.web_tool_call_limit,
+                    result.completion,
+                    result.result_format,
                 )
-                event_hook(
-                    {
-                        "event": "session.graph.updated",
-                        "data": {
-                            "session_id": session.session_id,
-                            "message_id": message_id,
-                            "trace_id": result.trace_id,
-                            "created_at": utc_now().isoformat(),
-                        },
-                    }
-                )
-            return (
-                session,
-                result.trace_id,
-                assistant_message,
-                result.error,
-                mission_request.web_tool_call_limit,
-                result.completion,
-                result.result_format,
-            )
         except asyncio.CancelledError:
             error = MissionError(code="cancelled", message=session.stop_reason or "session cancelled")
             session.last_error = error
@@ -326,7 +458,8 @@ class SessionService:
                 ResultFormat.TEXT,
             )
         finally:
-            if task is not None and self._active_runs.get(session_id) is task:
+            active_run = self._active_runs.get(session_id)
+            if task is not None and active_run is not None and active_run.task is task:
                 self._active_runs.pop(session_id, None)
 
     def _build_mission_request(
@@ -360,6 +493,8 @@ class SessionService:
     ) -> str:
         current_message_id = context_state.current_mission_message_id
         historical_turns = [turn for turn in context_state.active_turns if turn.message_id != current_message_id]
+        steer_turns = [turn for turn in historical_turns if turn.role == "steer"]
+        historical_turns = [turn for turn in historical_turns if turn.role != "steer"]
         lines = [
             f"You are continuing a research session named {session.name}.",
             "Treat the newest user message as the current primary mission.",
@@ -367,6 +502,9 @@ class SessionService:
             "Current mission:",
             message,
         ]
+        if steer_turns:
+            lines.append("Live steering updates:")
+            lines.extend(f"- {turn.content}" for turn in steer_turns)
         if session.stop_mode is not None:
             lines.append("Session stop request:")
             if session.stop_mode == SessionStopMode.SOFT:
@@ -518,6 +656,14 @@ class SessionService:
         )
         self._context_store.save(context_state)
         return context_state
+
+    def _resolve_group_session(self, session_group_id: str | None) -> ResearchSession | None:
+        if session_group_id is None:
+            return None
+        session = self._store.find_by_group_id(session_group_id)
+        if session is None:
+            raise RequestValidationError("session group not found")
+        return session
 
     def _latest_user_message_id(self, turns: list[SessionTurn]) -> str | None:
         for turn in reversed(turns):
